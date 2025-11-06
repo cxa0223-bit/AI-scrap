@@ -12,7 +12,13 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 
 from ai_analyzer import analyze_scalp_image, get_care_recommendations
-from recommender import load_products, recommend_products, format_product_card
+from recommender import load_products, recommend_products, format_product_card, save_recommendation_history
+from database import init_database, AnalysisHistoryDB, RecommendationDB, setup_database
+import uuid
+from datetime import datetime
+
+# 初始化数据库
+setup_database()
 
 # 页面配置
 st.set_page_config(
@@ -330,8 +336,12 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+# 生成或获取session_id
+if 'session_id' not in st.session_state:
+    st.session_state['session_id'] = str(uuid.uuid4())
+
 # 主界面
-tab1, tab2 = st.tabs(["🔍 Analysis | 分析", "ℹ️ Information | 信息"])
+tab1, tab2, tab3 = st.tabs(["🔍 Analysis | 分析", "📊 History | 历史记录", "ℹ️ Information | 信息"])
 
 with tab1:
     col1, col2 = st.columns([1, 1])
@@ -353,7 +363,27 @@ with tab1:
                 with st.spinner("Analyzing your scalp condition... | 正在分析头皮状况..."):
                     # 调用AI分析
                     result = analyze_scalp_image(image)
-                    
+
+                    # 保存分析历史到数据库
+                    analysis_data = {
+                        'session_id': st.session_state['session_id'],
+                        'scalp_type': result.get('scalp_type', ''),
+                        'confidence': result.get('confidence', 0),
+                        'health_score': result.get('health_score', 0),
+                        'concerns': result.get('concerns', []),
+                        'diagnosed_conditions': result.get('diagnosed_conditions', []),
+                        'recommendations': get_care_recommendations(result['scalp_type']),
+                        'image_path': '',  # 可以保存图片路径
+                        'user_id': st.session_state.get('user_id', '')
+                    }
+
+                    # 保存到数据库
+                    try:
+                        analysis_id = AnalysisHistoryDB.save_analysis(analysis_data)
+                        result['analysis_id'] = analysis_id
+                    except Exception as e:
+                        st.warning(f"保存分析历史失败: {e}")
+
                     # 保存到session state
                     st.session_state['analyzed'] = True
                     st.session_state['result'] = result
@@ -457,11 +487,18 @@ with tab1:
         if not products_df.empty:
             # 获取推荐产品
             recommended = recommend_products(
-                result['scalp_type'], 
-                result['concerns'], 
+                result['scalp_type'],
+                result['concerns'],
                 products_df,
                 top_n=3
             )
+
+            # 保存推荐历史（如果有analysis_id）
+            if 'analysis_id' in result and not recommended.empty:
+                try:
+                    save_recommendation_history(result['analysis_id'], recommended)
+                except Exception as e:
+                    print(f"保存推荐历史失败: {e}")
             
             if not recommended.empty:
                 cols = st.columns(3)
@@ -539,6 +576,91 @@ with tab1:
             st.error("Product database not found | 产品数据库未找到")
 
 with tab2:
+    st.markdown("### 📊 分析历史 | Analysis History")
+
+    # 获取当前会话的分析历史
+    history = AnalysisHistoryDB.get_user_history(st.session_state['session_id'], limit=20)
+
+    if history:
+        st.success(f"找到 {len(history)} 条分析记录")
+
+        # 显示统计信息
+        col1, col2, col3 = st.columns(3)
+
+        # 计算平均健康分数
+        avg_score = sum(h['health_score'] for h in history) / len(history)
+        with col1:
+            st.metric("平均健康分数", f"{avg_score:.1f}/100")
+
+        # 最常见的头皮类型
+        scalp_types = {}
+        for h in history:
+            scalp_type = h['scalp_type']
+            scalp_types[scalp_type] = scalp_types.get(scalp_type, 0) + 1
+        most_common = max(scalp_types.items(), key=lambda x: x[1])[0] if scalp_types else "无"
+        with col2:
+            st.metric("最常见类型", most_common)
+
+        with col3:
+            st.metric("总分析次数", len(history))
+
+        st.markdown("---")
+
+        # 显示历史记录列表
+        for i, record in enumerate(history, 1):
+            with st.expander(f"📅 {record['created_at']} - {record['scalp_type']}", expanded=(i==1)):
+                col_a, col_b = st.columns(2)
+
+                with col_a:
+                    st.markdown("**基本信息:**")
+                    st.write(f"• 头皮类型: {record['scalp_type']}")
+                    st.write(f"• 置信度: {record['confidence']}%")
+                    st.write(f"• 健康评分: {record['health_score']}/100")
+
+                with col_b:
+                    st.markdown("**检测到的问题:**")
+                    if record['concerns']:
+                        for concern in record['concerns']:
+                            st.write(f"• {concern}")
+                    else:
+                        st.write("无")
+
+                # 诊断的疾病
+                if record['diagnosed_conditions']:
+                    st.markdown("**医学诊断:**")
+                    for condition in record['diagnosed_conditions']:
+                        severity = condition.get('severity', '')
+                        name_cn = condition.get('name_cn', '')
+                        confidence = condition.get('confidence', 0)
+                        st.write(f"• {name_cn} - {severity} (置信度: {confidence}%)")
+
+                # 建议
+                if record['recommendations']:
+                    st.markdown("**护理建议:**")
+                    for rec in record['recommendations']:
+                        st.info(f"✓ {rec}")
+
+        # 显示总体统计
+        st.markdown("---")
+        statistics = AnalysisHistoryDB.get_statistics()
+        st.markdown("### 📈 总体统计 | Overall Statistics")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("总分析次数", statistics['total_analyses'])
+        with col2:
+            st.metric("今日分析", statistics['today_analyses'])
+        with col3:
+            st.metric("平均健康分数", f"{statistics['avg_health_score']:.1f}")
+        with col4:
+            # 显示头皮类型分布
+            if statistics['scalp_distribution']:
+                most_type = max(statistics['scalp_distribution'].items(), key=lambda x: x[1])
+                st.metric("最多类型", most_type[0])
+    else:
+        st.info("暂无分析历史记录。上传照片开始您的第一次分析！")
+
+with tab3:
     st.markdown("### ℹ️ About Our AI Technology | 关于我们的AI技术")
     
     col_info1, col_info2 = st.columns(2)

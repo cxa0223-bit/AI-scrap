@@ -24,6 +24,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制项目文件
 COPY . .
 
+# 初始化数据库
+RUN python init_database.py
+
 # 暴露Streamlit默认端口
 EXPOSE 8501
 

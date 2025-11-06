@@ -1,0 +1,16 @@
+id,name,brand,type,suitable_for,concern,price_myr,link,description,image
+1,Anti-Dandruff Shampoo,Head & Shoulders,洗发水,油性头皮,头屑/油腻,24.9,https://shopee.com.my/,深层清洁配方，有效去除头屑,product_1.jpeg
+2,Moisture Renewal Shampoo,Dove,洗发水,干性头皮,干燥/毛躁,28.5,https://shopee.com.my/,滋润保湿，修复受损发质,
+3,Tea Tree Oil Shampoo,THE BODY SHOP,洗发水,油性头皮,油腻/瘙痒,45.0,https://shopee.com.my/,天然茶树精油，平衡头皮油脂,
+4,Silky Smooth Care Shampoo,Pantene,洗发水,正常头皮,日常护理,19.9,https://shopee.com.my/,温和清洁，保持头发柔顺,
+5,Total Damage Care,Pantene,护发素,所有类型,受损发质,22.9,https://shopee.com.my/,修复受损，增强韧性,
+6,Anti Hair Fall Shampoo,Clear,洗发水,所有类型,脱发,32.0,https://shopee.com.my/,强韧发根，减少掉发,product_6.jpeg
+7,Scalp Care Conditioner,Head & Shoulders,护发素,油性头皮,头屑/油腻,26.9,https://shopee.com.my/,舒缓头皮，持久清爽,
+8,Argan Oil Treatment,Moroccan Oil,护发精华,干性头皮,干燥/分叉,89.0,https://shopee.com.my/,摩洛哥坚果油，深层滋养,
+9,Herbal Essence Shampoo,Guardian,洗发水,敏感头皮,敏感/瘙痒,18.5,https://shopee.com.my/,草本配方，温和不刺激,
+10,Caffeine Shampoo,Alpecin,洗发水,所有类型,脱发/稀疏,68.0,https://shopee.com.my/,咖啡因配方，刺激毛囊生长,
+11,Scalp Exfoliator,Watsons,头皮护理,油性头皮,角质堆积,35.0,https://shopee.com.my/,去除老废角质，清洁毛孔,
+12,Hair Tonic,Ba Wang,生发水,所有类型,脱发,55.0,https://lazada.com.my/,中药配方，防脱育发,
+13,Color Protect Shampoo,L'Oreal,洗发水,染发发质,褪色,42.0,https://shopee.com.my/,锁色保护，延长发色持久度,
+14,Biotin Shampoo,OGX,洗发水,细软发质,细软/无力,39.9,https://shopee.com.my/,生物素配方，增加发量,
+15,Coconut Milk Conditioner,OGX,护发素,干性头皮,干燥,38.9,https://shopee.com.my/,椰奶滋养，柔顺光泽,

@@ -8,6 +8,60 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+def is_scalp_image(img_array, img_hsv):
+    """
+    验证图像是否为头皮照片
+
+    参数:
+        img_array: RGB图像数组
+        img_hsv: HSV图像数组
+
+    返回:
+        tuple: (是否为头皮图像, 置信度)
+    """
+    # 检查图像是否包含肤色范围的像素
+    lower_skin = np.array([0, 20, 70])
+    upper_skin = np.array([25, 255, 255])
+    skin_mask = cv2.inRange(img_hsv, lower_skin, upper_skin)
+
+    # 添加第二个肤色范围（适应不同肤色）
+    lower_skin2 = np.array([0, 10, 60])
+    upper_skin2 = np.array([40, 150, 255])
+    skin_mask2 = cv2.inRange(img_hsv, lower_skin2, upper_skin2)
+
+    combined_mask = cv2.bitwise_or(skin_mask, skin_mask2)
+    skin_percentage = np.sum(combined_mask > 0) / combined_mask.size * 100
+
+    # 检查是否有足够的纹理（毛发特征）
+    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 30, 100)
+    edge_density = np.sum(edges > 0) / edges.size * 100
+
+    # 检查颜色分布是否自然
+    color_std = np.std(img_array)
+
+    # 综合判断
+    is_scalp = False
+    confidence = 0
+
+    if skin_percentage > 15:  # 至少15%的肤色像素
+        confidence += 30
+
+    if 1 < edge_density < 50:  # 合理的边缘密度范围
+        confidence += 30
+
+    if 20 < color_std < 80:  # 自然的颜色变化范围
+        confidence += 20
+
+    # 检查是否有明显的头发纹理
+    if edge_density > 5 and skin_percentage > 10:
+        confidence += 20
+
+    if confidence >= 60:
+        is_scalp = True
+
+    return is_scalp, confidence
+
 def analyze_scalp_image(image):
     """
     分析头皮图像并返回医学级诊断结果
@@ -25,8 +79,40 @@ def analyze_scalp_image(image):
     if len(img_array.shape) == 2:
         img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2RGB)
 
-    # 转换到不同色彩空间
+    # 转换到HSV色彩空间
     img_hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+
+    # ===== 验证是否为头皮图像 =====
+    is_scalp, validation_confidence = is_scalp_image(img_array, img_hsv)
+
+    if not is_scalp:
+        # 如果不是头皮图像，返回警告信息
+        return {
+            'scalp_type': '无法识别 (Unrecognized)',
+            'diagnosed_conditions': [],
+            'concerns': [
+                '⚠️ 图像识别失败：这似乎不是头皮照片',
+                '📷 请上传清晰的头皮近距离照片',
+                '💡 确保照片包含头发和头皮细节'
+            ],
+            'confidence': validation_confidence,
+            'health_score': 0,
+            'medical_advice': {
+                'urgency': 'normal',
+                'see_doctor': False,
+                'recommendations': [
+                    '📸 请重新拍摄头皮照片',
+                    '💡 拍摄时请确保光线充足',
+                    '🔍 建议使用近距离拍摄，清晰显示头皮状况'
+                ]
+            },
+            'details': {
+                'error': 'Invalid image',
+                'message': 'Not a scalp image'
+            }
+        }
+
+    # 继续正常的分析流程
     img_gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
 
     # ===== 1. 多维度特征提取 =====
@@ -319,33 +405,40 @@ def detect_hairline_recession(img_gray, edges):
 # ===== 医学疾病诊断 =====
 
 def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
-    """基于特征诊断具体医学疾病"""
+    """基于特征诊断具体医学疾病（严格版本）"""
     conditions = []
 
     # 1. 斑秃 (Alopecia Areata) - 鬼剃头
-    if features['bald_spots_count'] > 0 or features['circular_pattern'] > 0:
+    # 更严格的条件：必须有明显的秃斑且面积较大
+    if features['bald_spots_count'] >= 2 and features['bald_spots_size'] > 3:
         severity = "轻度"
-        if features['bald_spots_size'] > 5:
+        if features['bald_spots_size'] > 10:
             severity = "中度"
-        if features['bald_spots_size'] > 15:
+        if features['bald_spots_size'] > 20:
             severity = "重度"
+
+        # 需要圆形特征来提高置信度
+        confidence = 65
+        if features['circular_pattern'] > 1:
+            confidence = 75
 
         conditions.append({
             'name_cn': '斑秃',
             'name_en': 'Alopecia Areata',
             'common_name': '鬼剃头',
             'severity': severity,
-            'confidence': 75 if features['circular_pattern'] > 0 else 60,
+            'confidence': confidence,
             'description': '头皮出现圆形或椭圆形脱发斑，边界清楚',
             'icon': '🔴'
         })
 
     # 2. 雄激素性脱发 (Androgenetic Alopecia) - 男性/女性型脱发
-    if features['hair_density'] < 20 and features['hairline_recession'] > 15:
+    # 更严格：需要低密度和明显的发际线后移
+    if features['hair_density'] < 15 and features['hairline_recession'] > 20:
         severity = "早期"
-        if features['hair_density'] < 15:
-            severity = "中期"
         if features['hair_density'] < 10:
+            severity = "中期"
+        if features['hair_density'] < 5:
             severity = "晚期"
 
         conditions.append({
@@ -353,17 +446,18 @@ def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
             'name_en': 'Androgenetic Alopecia',
             'common_name': '男性/女性型脱发',
             'severity': severity,
-            'confidence': 70,
+            'confidence': 65,
             'description': '头发逐渐变细、变软、脱落，发际线后移或头顶稀疏',
             'icon': '📉'
         })
 
     # 3. 脂溢性皮炎 (Seborrheic Dermatitis)
-    if features['oiliness'] > 65 and features['yellow_patches'] > 8:
+    # 更严格：需要多个症状同时存在
+    if features['oiliness'] > 75 and features['yellow_patches'] > 12 and features['dandruff_level'] > 10:
         severity = "轻度"
-        if features['dandruff_level'] > 8 and features['redness_level'] > 10:
+        if features['redness_level'] > 15 and features['inflammation_level'] > 15:
             severity = "中度"
-        if features['inflammation_level'] > 20:
+        if features['inflammation_level'] > 25:
             severity = "重度"
 
         conditions.append({
@@ -371,17 +465,18 @@ def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
             'name_en': 'Seborrheic Dermatitis',
             'common_name': '脂溢性湿疹',
             'severity': severity,
-            'confidence': 80,
+            'confidence': 70,
             'description': '头皮油腻、发红、有黄色鳞屑和头屑',
             'icon': '💛'
         })
 
     # 4. 毛囊炎 (Folliculitis)
-    if features['folliculitis_points'] > 5 and features['redness_level'] > 8:
+    # 更严格：需要更多红点和明显的炎症
+    if features['folliculitis_points'] > 10 and features['redness_level'] > 12 and features['inflammation_level'] > 10:
         severity = "轻度"
-        if features['folliculitis_points'] > 15:
+        if features['folliculitis_points'] > 20:
             severity = "中度"
-        if features['inflammation_level'] > 18:
+        if features['inflammation_level'] > 22:
             severity = "重度"
 
         conditions.append({
@@ -389,17 +484,18 @@ def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
             'name_en': 'Folliculitis',
             'common_name': '毛囊感染',
             'severity': severity,
-            'confidence': 65,
+            'confidence': 60,
             'description': '毛囊周围出现红色丘疹或脓疱，可能伴有疼痛或瘙痒',
             'icon': '🔴'
         })
 
     # 5. 银屑病/牛皮癣 (Psoriasis)
-    if features['red_patches'] > 10 and features['scalp_scales'] > 12:
+    # 更严格：需要明显的红斑和鳞屑
+    if features['red_patches'] > 15 and features['scalp_scales'] > 18:
         severity = "轻度"
-        if features['red_patches'] > 20:
+        if features['red_patches'] > 25:
             severity = "中度"
-        if features['scalp_scales'] > 25:
+        if features['scalp_scales'] > 30:
             severity = "重度"
 
         conditions.append({
@@ -407,17 +503,18 @@ def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
             'name_en': 'Psoriasis',
             'common_name': '牛皮癣',
             'severity': severity,
-            'confidence': 70,
+            'confidence': 65,
             'description': '头皮出现红色斑块，覆盖银白色鳞屑，边界清楚',
             'icon': '🔶'
         })
 
     # 6. 头癣 (Tinea Capitis) - 真菌感染
-    if features['scalp_scales'] > 15 and features['dandruff_level'] > 10 and features['hair_density'] < 25:
+    # 更严格：需要多个症状组合
+    if features['scalp_scales'] > 20 and features['dandruff_level'] > 15 and features['hair_density'] < 20 and features['bald_spots_count'] > 0:
         severity = "轻度"
-        if features['bald_spots_count'] > 0:
+        if features['bald_spots_count'] > 2:
             severity = "中度"
-        if features['inflammation_level'] > 15:
+        if features['inflammation_level'] > 20:
             severity = "重度"
 
         conditions.append({
@@ -425,15 +522,16 @@ def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
             'name_en': 'Tinea Capitis',
             'common_name': '真菌性脱发',
             'severity': severity,
-            'confidence': 60,
+            'confidence': 55,
             'description': '真菌感染引起，头皮有鳞屑、脱发，可能有黑点残留',
             'icon': '🍄'
         })
 
     # 7. 接触性皮炎 (Contact Dermatitis)
-    if features['redness_level'] > 12 and features['color_uniformity'] < 50:
+    # 更严格：需要明显的炎症和颜色不均
+    if features['redness_level'] > 18 and features['inflammation_level'] > 18 and features['color_uniformity'] < 40:
         severity = "轻度"
-        if features['inflammation_level'] > 15:
+        if features['inflammation_level'] > 22:
             severity = "中度"
 
         conditions.append({
@@ -441,19 +539,20 @@ def diagnose_medical_conditions(features, img_rgb, img_hsv, img_gray):
             'name_en': 'Contact Dermatitis',
             'common_name': '过敏性皮炎',
             'severity': severity,
-            'confidence': 55,
+            'confidence': 50,
             'description': '接触染发剂、洗发水等过敏原后引起，头皮发红、瘙痒',
             'icon': '⚠️'
         })
 
     # 8. 休止期脱发 (Telogen Effluvium)
-    if features['hair_density'] < 25 and features['texture_quality'] < 30 and features['bald_spots_count'] == 0:
+    # 更严格：需要非常低的密度和质量
+    if features['hair_density'] < 18 and features['texture_quality'] < 25 and features['bald_spots_count'] == 0:
         conditions.append({
             'name_cn': '休止期脱发',
             'name_en': 'Telogen Effluvium',
             'common_name': '弥漫性脱发',
             'severity': '中度',
-            'confidence': 50,
+            'confidence': 45,
             'description': '头发整体变稀疏，无明显秃斑，常由压力、疾病、营养不良引起',
             'icon': '💤'
         })

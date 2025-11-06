@@ -14,6 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from ai_analyzer import analyze_scalp_image, get_care_recommendations
 from recommender import load_products, recommend_products, format_product_card, save_recommendation_history
 from database import init_database, AnalysisHistoryDB, RecommendationDB, setup_database
+from ai_services import AIServiceManager
 import uuid
 from datetime import datetime
 
@@ -361,8 +362,53 @@ with tab1:
             # 分析按钮
             if st.button("🚀 Start AI Analysis | 开始AI分析", type="primary"):
                 with st.spinner("Analyzing your scalp condition... | 正在分析头皮状况..."):
-                    # 调用AI分析
-                    result = analyze_scalp_image(image)
+                    # Check if AI service is enabled
+                    ai_config = st.session_state.get('ai_config', {})
+
+                    # Perform local analysis first
+                    local_result = analyze_scalp_image(image)
+
+                    # If AI is enabled, also perform AI analysis
+                    if ai_config.get('enable_ai', False):
+                        service_type = ai_config.get('service', 'Local Analysis (Rule-based)')
+                        if service_type != 'Local Analysis (Rule-based)':
+                            try:
+                                # Get API key based on service
+                                if service_type == "Claude (Anthropic)":
+                                    api_key = ai_config.get('claude_api_key', '')
+                                elif service_type == "GPT-4 Vision (OpenAI)":
+                                    api_key = ai_config.get('openai_api_key', '')
+                                else:
+                                    api_key = ''
+
+                                # Create AI service
+                                ai_service = AIServiceManager.create_service(service_type, api_key)
+
+                                if ai_service:
+                                    # Get AI analysis
+                                    language = ai_config.get('language', 'zh')
+                                    ai_result = ai_service.analyze_scalp_image(image, language)
+
+                                    # Combine results if configured
+                                    if ai_config.get('combine_results', True):
+                                        result = AIServiceManager.combine_analyses(ai_result, local_result)
+                                    else:
+                                        result = ai_result
+
+                                    # Add AI service info
+                                    result['ai_service_used'] = service_type
+                                else:
+                                    result = local_result
+                                    st.warning("AI service not available, using local analysis")
+
+                            except Exception as e:
+                                st.error(f"AI analysis error: {str(e)}")
+                                result = local_result
+                                result['ai_error'] = str(e)
+                        else:
+                            result = local_result
+                    else:
+                        result = local_result
 
                     # 保存分析历史到数据库
                     analysis_data = {

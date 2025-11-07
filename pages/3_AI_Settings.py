@@ -108,6 +108,10 @@ with col2:
 st.markdown("---")
 
 # API Key Configuration
+# Initialize both key variables to prevent NameError
+claude_key = config.get('claude_api_key', '')
+openai_key = config.get('openai_api_key', '')
+
 if enable_ai:
     st.subheader("🔑 API Key Configuration")
 
@@ -140,14 +144,6 @@ if enable_ai:
         if not services["GPT-4 Vision (OpenAI)"]:
             st.warning("⚠️ Please install openai library:")
             st.code("pip install openai", language="bash")
-
-    else:
-        claude_key = config.get('claude_api_key', '')
-        openai_key = config.get('openai_api_key', '')
-
-else:
-    claude_key = config.get('claude_api_key', '')
-    openai_key = config.get('openai_api_key', '')
 
 st.markdown("---")
 
@@ -230,23 +226,72 @@ with st.expander("🧪 Test AI Connection", expanded=False):
                     try:
                         if selected_service == "Claude (Anthropic)":
                             if not claude_key:
-                                st.error("Please provide Claude API key")
+                                st.error("❌ Please provide Claude API key")
                             else:
-                                # Simple test
-                                st.success("✅ Claude API key format looks valid")
-                                st.info("Full test will be performed on first image analysis")
+                                # 实际测试API连接
+                                try:
+                                    from anthropic import Anthropic
+                                    client = Anthropic(api_key=claude_key)
+
+                                    # 发送测试请求
+                                    message = client.messages.create(
+                                        model="claude-3-haiku-20240307",  # 使用可用的Haiku模型
+                                        max_tokens=50,
+                                        messages=[
+                                            {"role": "user", "content": "Say 'API test successful' in Chinese"}
+                                        ]
+                                    )
+
+                                    response = message.content[0].text
+                                    st.success("✅ Claude API连接成功!")
+                                    st.info(f"测试响应: {response}")
+                                    st.balloons()
+                                except Exception as api_error:
+                                    error_msg = str(api_error)
+                                    st.error(f"❌ API连接失败: {error_msg}")
+
+                                    # 提供具体建议
+                                    if "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
+                                        st.warning("🔑 API密钥无效，请检查密钥是否正确")
+                                        st.info("获取新密钥: https://console.anthropic.com/")
+                                    elif "rate" in error_msg.lower() or "quota" in error_msg.lower():
+                                        st.warning("⏰ API配额已用完，请检查账户余额")
+                                    elif "network" in error_msg.lower():
+                                        st.warning("🌐 网络连接问题，请检查网络")
+                                    else:
+                                        with st.expander("查看详细错误"):
+                                            st.code(error_msg)
 
                         elif selected_service == "GPT-4 Vision (OpenAI)":
                             if not openai_key:
-                                st.error("Please provide OpenAI API key")
+                                st.error("❌ Please provide OpenAI API key")
                             else:
-                                # Simple test
-                                st.success("✅ OpenAI API key format looks valid")
-                                st.info("Full test will be performed on first image analysis")
+                                # 实际测试OpenAI API
+                                try:
+                                    from openai import OpenAI
+                                    client = OpenAI(api_key=openai_key)
+
+                                    # 发送测试请求
+                                    response = client.chat.completions.create(
+                                        model="gpt-4",
+                                        messages=[
+                                            {"role": "user", "content": "Say 'API test successful'"}
+                                        ],
+                                        max_tokens=20
+                                    )
+
+                                    result = response.choices[0].message.content
+                                    st.success("✅ OpenAI API连接成功!")
+                                    st.info(f"测试响应: {result}")
+                                    st.balloons()
+                                except Exception as api_error:
+                                    st.error(f"❌ API连接失败: {str(api_error)}")
+                                    with st.expander("查看详细错误"):
+                                        st.code(str(api_error))
                     except Exception as e:
-                        st.error(f"Error: {str(e)}")
+                        st.error(f"❌ Error: {str(e)}")
             else:
-                st.info("Using local analysis - no API key required")
+                st.info("ℹ️ Using local analysis - no API key required")
 
 # Display current status
 st.sidebar.markdown("### 📊 Current Status")

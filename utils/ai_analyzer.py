@@ -8,6 +8,12 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+try:
+    from .detailed_analyzer import DetailedScalpAnalyzer
+except ImportError:
+    # 如果详细分析器不可用，设置为None
+    DetailedScalpAnalyzer = None
+
 def is_scalp_image(img_array, img_hsv):
     """
     验证图像是否为头皮照片
@@ -150,7 +156,16 @@ def analyze_scalp_image(image):
         'bald_spots_detected': features.get('bald_spots_count', 0)
     }
 
-    return {
+    # ===== 9. 执行详细分析（如果可用）=====
+    detailed_analysis = None
+    if DetailedScalpAnalyzer:
+        try:
+            detailed_analysis = DetailedScalpAnalyzer.analyze_scalp_condition_detailed(img_array)
+        except Exception as e:
+            print(f"详细分析失败: {e}")
+            detailed_analysis = None
+
+    result = {
         'scalp_type': scalp_type,
         'diagnosed_conditions': diagnosed_conditions,  # 新增：疾病诊断
         'concerns': concerns,
@@ -159,6 +174,12 @@ def analyze_scalp_image(image):
         'medical_advice': medical_advice,  # 新增：医学建议
         'details': details
     }
+
+    # 添加详细分析结果
+    if detailed_analysis:
+        result['detailed_analysis'] = detailed_analysis
+
+    return result
 
 def extract_scalp_features(img_rgb, img_hsv, img_gray):
     """提取头皮图像的多维度特征"""

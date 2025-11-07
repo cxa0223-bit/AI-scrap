@@ -130,7 +130,7 @@ class ClaudeService(AIServiceBase):
         try:
             # Call Claude API
             message = self.client.messages.create(
-                model="claude-3-opus-20240229",  # or claude-3-sonnet-20240229
+                model="claude-3-haiku-20240307",  # Claude 3 Haiku - 快速且经济
                 max_tokens=1500,
                 temperature=0,
                 system="You are a professional dermatologist specializing in scalp health analysis.",

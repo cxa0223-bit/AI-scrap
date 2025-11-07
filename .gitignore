@@ -46,3 +46,25 @@ build/
 
 # Windows
 nul
+desktop.ini
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+
+# API keys and sensitive files
+set_claude_key.bat
+start_with_claude.bat
+*_with_key.*
+*_local_test.*
+
+# Uploaded images
+assets/uploads/
+uploads/
+temp/
+
+# Test files with real keys
+test_claude_api_local.py
+test_with_real_key.py

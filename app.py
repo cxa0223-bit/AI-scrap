@@ -349,38 +349,106 @@ with tab1:
     
     with col1:
         st.markdown("### 📤 Upload Image | 上传照片")
+
+        # 添加清除结果按钮
+        if 'analyzed' in st.session_state and st.session_state['analyzed']:
+            if st.button("🔄 Clear Results | 清除结果", help="Clear current analysis results | 清除当前分析结果"):
+                st.session_state['analyzed'] = False
+                st.session_state['result'] = None
+                st.session_state['previous_file'] = None
+                st.rerun()
+
         uploaded_file = st.file_uploader(
-            "Choose your scalp image | 选择头皮照片", 
+            "Choose your scalp image | 选择头皮照片",
             type=['jpg', 'jpeg', 'png'],
-            help="Supports JPG, PNG formats | 支持JPG、PNG格式"
+            help="Supports JPG, PNG formats | 支持JPG、PNG格式",
+            key="file_uploader"
         )
-        
+
+        # 检测是否上传了新图片
         if uploaded_file:
+            # 获取当前文件的标识信息
+            current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+
+            # 如果是新图片，清除之前的分析结果
+            if 'previous_file' not in st.session_state or st.session_state['previous_file'] != current_file_id:
+                st.session_state['analyzed'] = False
+                st.session_state['result'] = None
+                st.session_state['previous_file'] = current_file_id
+
             image = Image.open(uploaded_file)
             st.image(image, caption="Uploaded Image | 上传的照片", use_container_width=True)
-            
-            # 分析按钮
-            if st.button("🚀 Start AI Analysis | 开始AI分析", type="primary"):
-                with st.spinner("Analyzing your scalp condition... | 正在分析头皮状况..."):
+
+            # 添加Claude快速配置选项
+            st.markdown("---")
+            st.markdown("### 🤖 AI分析选项 | AI Analysis Options")
+
+            # 快速Claude API配置
+            use_claude_directly = st.checkbox("🚀 **使用Claude直接分析** (获得最精准的医学诊断)", value=False)
+
+            if use_claude_directly:
+                # 检查是否已有API密钥
+                existing_key = st.session_state.get('ai_config', {}).get('claude_api_key', '')
+
+                if not existing_key:
+                    st.warning("请输入您的Claude API密钥以使用AI增强分析")
+                    claude_api_key = st.text_input(
+                        "Claude API密钥",
+                        type="password",
+                        placeholder="sk-ant-api03-...",
+                        help="获取密钥: https://console.anthropic.com/"
+                    )
+
+                    if claude_api_key:
+                        # 保存API密钥到session
+                        if 'ai_config' not in st.session_state:
+                            st.session_state['ai_config'] = {}
+                        st.session_state['ai_config']['claude_api_key'] = claude_api_key
+                        st.session_state['ai_config']['enable_ai'] = True
+                        st.session_state['ai_config']['service'] = 'Claude (Anthropic)'
+                        st.session_state['ai_config']['combine_results'] = False  # 只用Claude结果
+                        st.session_state['ai_config']['language'] = 'zh'
+                        st.success("✅ Claude API密钥已配置")
+                else:
+                    st.success(f"✅ 已配置Claude API (密钥: {existing_key[:20]}...)")
+                    # 确保使用Claude
+                    st.session_state['ai_config']['enable_ai'] = True
+                    st.session_state['ai_config']['service'] = 'Claude (Anthropic)'
+                    st.session_state['ai_config']['combine_results'] = False  # 只用Claude结果
+
+            # 显示AI配置状态（调试信息）
+            st.markdown("---")
+            with st.expander("🔍 AI配置状态 | AI Configuration Status", expanded=False):
+                ai_config = st.session_state.get('ai_config', {})
+                st.write(f"**AI启用状态**: {'✅ 已启用' if ai_config.get('enable_ai', False) else '❌ 未启用'}")
+                st.write(f"**选择的服务**: {ai_config.get('service', '未设置')}")
+                st.write(f"**API密钥已配置**: {'✅ 是' if ai_config.get('claude_api_key', '') else '❌ 否'}")
+                if ai_config.get('claude_api_key', ''):
+                    st.write(f"**密钥预览**: {ai_config.get('claude_api_key', '')[:25]}...")
+                st.write(f"**分析语言**: {ai_config.get('language', 'zh')}")
+                st.write(f"**合并本地分析**: {'是' if ai_config.get('combine_results', False) else '否'}")
+
+            # 分析按钮 - 允许重新分析
+            button_text = "🔄 Re-analyze | 重新分析" if st.session_state.get('analyzed', False) else "🚀 Start AI Analysis | 开始AI分析"
+            if st.button(button_text, type="primary", disabled=(use_claude_directly and not st.session_state.get('ai_config', {}).get('claude_api_key'))):
+                with st.spinner("正在分析您的头皮状况... | Analyzing your scalp condition..."):
                     # Check if AI service is enabled
                     ai_config = st.session_state.get('ai_config', {})
 
-                    # Perform local analysis first
-                    local_result = analyze_scalp_image(image)
+                    result = None  # 初始化结果
 
-                    # If AI is enabled, also perform AI analysis
-                    if ai_config.get('enable_ai', False):
-                        service_type = ai_config.get('service', 'Local Analysis (Rule-based)')
-                        if service_type != 'Local Analysis (Rule-based)':
-                            try:
-                                # Get API key based on service
-                                if service_type == "Claude (Anthropic)":
-                                    api_key = ai_config.get('claude_api_key', '')
-                                elif service_type == "GPT-4 Vision (OpenAI)":
-                                    api_key = ai_config.get('openai_api_key', '')
-                                else:
-                                    api_key = ''
+                    # 如果启用了AI服务，优先使用AI分析
+                    if ai_config.get('enable_ai', False) and ai_config.get('claude_api_key'):
+                        service_type = ai_config.get('service', 'Claude (Anthropic)')
 
+                        # 显示分析进度
+                        progress_text = st.empty()
+                        progress_text.text("🤖 正在使用Claude AI进行深度分析...")
+
+                        try:
+                            api_key = ai_config.get('claude_api_key', '')
+
+                            if api_key:
                                 # Create AI service
                                 ai_service = AIServiceManager.create_service(service_type, api_key)
 
@@ -389,36 +457,66 @@ with tab1:
                                     language = ai_config.get('language', 'zh')
                                     ai_result = ai_service.analyze_scalp_image(image, language)
 
-                                    # Combine results if configured
-                                    if ai_config.get('combine_results', True):
-                                        result = AIServiceManager.combine_analyses(ai_result, local_result)
-                                    else:
+                                    # 如果不合并结果，直接使用Claude结果
+                                    if not ai_config.get('combine_results', False):
                                         result = ai_result
-
-                                    # Add AI service info
-                                    result['ai_service_used'] = service_type
+                                        result['ai_service_used'] = service_type
+                                        result['analysis_method'] = 'Claude AI Direct Analysis'
+                                        progress_text.text("✅ Claude AI分析完成！")
+                                    else:
+                                        # 合并本地和AI结果
+                                        progress_text.text("🔄 正在执行本地分析...")
+                                        local_result = analyze_scalp_image(image)
+                                        result = AIServiceManager.combine_analyses(ai_result, local_result)
+                                        result['ai_service_used'] = service_type
+                                        result['analysis_method'] = 'Claude AI + Local Combined'
+                                        progress_text.text("✅ 综合分析完成！")
                                 else:
-                                    result = local_result
-                                    st.warning("AI service not available, using local analysis")
+                                    progress_text.text("⚠️ AI服务不可用，使用本地分析...")
+                                    result = analyze_scalp_image(image)
+                                    result['analysis_method'] = 'Local Analysis (Fallback)'
 
-                            except Exception as e:
-                                st.error(f"AI analysis error: {str(e)}")
-                                result = local_result
-                                result['ai_error'] = str(e)
-                        else:
-                            result = local_result
+                        except Exception as e:
+                            error_msg = str(e)
+                            st.error(f"❌ AI分析错误: {error_msg}")
+
+                            # 提供具体的错误建议
+                            if "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                                st.warning("🔑 API密钥问题：请检查您的Claude API密钥是否正确")
+                                st.info("💡 获取API密钥: https://console.anthropic.com/")
+                            elif "rate" in error_msg.lower() or "quota" in error_msg.lower():
+                                st.warning("⏰ API配额问题：您的API配额可能已用完，请检查账户余额")
+                            elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+                                st.warning("🌐 网络连接问题：请检查网络连接是否正常")
+                            else:
+                                st.warning("⚠️ 未知错误：请查看错误详情或联系技术支持")
+
+                            # 显示详细错误（可展开）
+                            with st.expander("查看详细错误信息"):
+                                st.code(error_msg)
+
+                            progress_text.text("⚠️ AI分析失败，正在使用本地分析...")
+                            result = analyze_scalp_image(image)
+                            result['ai_error'] = error_msg
+                            result['analysis_method'] = 'Local Analysis (Error Fallback)'
                     else:
-                        result = local_result
+                        # 没有配置AI，使用本地分析
+                        result = analyze_scalp_image(image)
+                        result['analysis_method'] = 'Local Analysis Only'
+
+                        if use_claude_directly:
+                            st.warning("请先配置Claude API密钥才能使用AI分析")
 
                     # 保存分析历史到数据库
+                    scalp_type = result.get('scalp_type', 'normal')
                     analysis_data = {
                         'session_id': st.session_state['session_id'],
-                        'scalp_type': result.get('scalp_type', ''),
+                        'scalp_type': scalp_type,
                         'confidence': result.get('confidence', 0),
                         'health_score': result.get('health_score', 0),
                         'concerns': result.get('concerns', []),
                         'diagnosed_conditions': result.get('diagnosed_conditions', []),
-                        'recommendations': get_care_recommendations(result['scalp_type']),
+                        'recommendations': get_care_recommendations(scalp_type),
                         'image_path': '',  # 可以保存图片路径
                         'user_id': st.session_state.get('user_id', '')
                     }
@@ -443,24 +541,168 @@ with tab1:
             
             # 显示分析结果
             st.success("✅ Analysis Complete! | 分析完成！")
-            
+
+            # 显示分析方法
+            if 'analysis_method' in result:
+                if 'Claude' in result['analysis_method']:
+                    st.info(f"🤖 **分析方法**: {result['analysis_method']}")
+                    st.markdown("*Claude AI提供专业的医学级分析结果*")
+                else:
+                    st.info(f"🔬 **分析方法**: {result['analysis_method']}")
+
+            # 如果是Claude直接分析，显示AI的详细响应
+            if 'ai_service_used' in result and result.get('ai_service_used') == 'Claude (Anthropic)':
+                if 'ai_raw_response' in result:
+                    with st.expander("🤖 **Claude AI原始分析结果**", expanded=False):
+                        st.markdown(result.get('ai_raw_response', ''))
+
             # 头皮类型和置信度
             col_a, col_b = st.columns(2)
             with col_a:
                 st.metric(
-                    label="Scalp Type | 头皮类型", 
+                    label="Scalp Type | 头皮类型",
                     value=result['scalp_type']
                 )
             with col_b:
                 st.metric(
                     label="Confidence | 置信度",
-                    value=f"{result['confidence']}%"
+                    value=f"{result.get('confidence', 0)}%"
                 )
             
             # 健康评分
             st.markdown("#### 🏥 Health Score | 健康评分")
-            st.progress(result['health_score'] / 100)
-            st.write(f"**{result['health_score']}/100**")
+            health_score = result.get('health_score', 0)
+            if health_score > 0:
+                st.progress(health_score / 100)
+                st.write(f"**{health_score}/100**")
+            else:
+                st.info("健康评分待评估 | Health score pending")
+
+            # 详细分析结果（新增）
+            if 'detailed_analysis' in result and result['detailed_analysis']:
+                st.markdown("---")
+                st.markdown("#### 🔬 Detailed Analysis | 详细分析")
+
+                detailed = result['detailed_analysis']
+
+                # 显示头皮层分析
+                with st.expander("📊 **头皮层分析 | Scalp Layer Analysis**", expanded=True):
+                    if 'layer_analysis' in detailed:
+                        layers = detailed['layer_analysis']
+
+                        # 表皮层分析
+                        st.markdown("**表皮层 (Epidermis):**")
+                        epidermis = layers.get('epidermis', {})
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"• 厚度: {epidermis.get('thickness', 'N/A')}")
+                            st.write(f"• 角质化: {epidermis.get('keratinization', 'N/A')}")
+                        with col2:
+                            st.write(f"• 屏障功能: {epidermis.get('barrier_function', 'N/A')}")
+                            st.write(f"• 细胞更新: {epidermis.get('cell_turnover', 'N/A')}")
+                        if epidermis.get('issues'):
+                            st.warning("⚠️ 问题: " + ", ".join(epidermis['issues']))
+
+                        # 真皮层分析
+                        st.markdown("**真皮层 (Dermis):**")
+                        dermis = layers.get('dermis', {})
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"• 胶原密度: {dermis.get('collagen_density', 'N/A')}")
+                            st.write(f"• 弹性: {dermis.get('elasticity', 'N/A')}")
+                        with col2:
+                            st.write(f"• 血液循环: {dermis.get('blood_circulation', 'N/A')}")
+                            st.write(f"• 炎症: {dermis.get('inflammation', 'N/A')}")
+                        if dermis.get('issues'):
+                            st.warning("⚠️ 问题: " + ", ".join(dermis['issues']))
+
+                        # 毛囊分析
+                        st.markdown("**毛囊 (Follicles):**")
+                        follicles = layers.get('follicles', {})
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"• 健康状态: {follicles.get('health', 'N/A')}")
+                            st.write(f"• 堵塞情况: {follicles.get('blockage', 'N/A')}")
+                        with col2:
+                            st.write(f"• 炎症: {follicles.get('inflammation', 'N/A')}")
+                            st.write(f"• 萎缩: {follicles.get('miniaturization', 'N/A')}")
+
+                        # 皮脂腺分析
+                        st.markdown("**皮脂腺 (Sebaceous Glands):**")
+                        glands = layers.get('sebaceous_glands', {})
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"• 活动性: {glands.get('activity', 'N/A')}")
+                            st.write(f"• 分泌水平: {glands.get('secretion_level', 'N/A')}")
+                        with col2:
+                            st.write(f"• 堵塞: {glands.get('blockage', 'N/A')}")
+                            st.write(f"• 炎症: {glands.get('inflammation', 'N/A')}")
+
+                # 显示微观症状
+                with st.expander("🔍 **微观症状检测 | Microscopic Symptoms**", expanded=True):
+                    if 'micro_symptoms' in detailed:
+                        symptoms = detailed['micro_symptoms']
+                        stats = detailed.get('statistics', {})
+
+                        # 创建症状统计表
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("红点/红斑", stats.get('red_dots_count', 0))
+                        with col2:
+                            st.metric("鳞屑/皮屑", stats.get('flakes_count', 0))
+                        with col3:
+                            st.metric("脓包/丘疹", stats.get('pustules_count', 0))
+
+                        # 详细症状列表
+                        if symptoms.get('red_dots'):
+                            st.markdown("**🔴 红点/红斑分布:**")
+                            for i, dot in enumerate(symptoms['red_dots'][:5], 1):  # 只显示前5个
+                                st.write(f"  {i}. {dot.get('type', '红点')} - 强度: {dot.get('intensity', 'N/A')}, 大小: {dot.get('size', 'N/A')}px")
+
+                        if symptoms.get('white_flakes'):
+                            st.markdown("**⚪ 鳞屑分布:**")
+                            for i, flake in enumerate(symptoms['white_flakes'][:5], 1):
+                                st.write(f"  {i}. {flake.get('type', '鳞屑')} - 严重度: {flake.get('severity', 'N/A')}")
+
+                        if symptoms.get('pustules'):
+                            st.markdown("**🟡 脓包/丘疹:**")
+                            for i, pustule in enumerate(symptoms['pustules'][:5], 1):
+                                st.write(f"  {i}. {pustule.get('type', '丘疹')} - 阶段: {pustule.get('stage', 'N/A')}")
+
+                # 显示严重程度评估
+                with st.expander("📈 **严重程度评估 | Severity Assessment**", expanded=False):
+                    if 'severity_assessment' in detailed:
+                        severity = detailed['severity_assessment']
+
+                        # 炎症评估
+                        inflammation = severity.get('inflammation', {})
+                        st.markdown("**炎症程度:**")
+                        st.write(f"• 等级: {inflammation.get('level', 'N/A')}")
+                        st.write(f"• 描述: {inflammation.get('description', 'N/A')}")
+
+                        # 干燥评估
+                        dryness = severity.get('dryness', {})
+                        st.markdown("**干燥程度:**")
+                        st.write(f"• 等级: {dryness.get('level', 'N/A')}")
+                        st.write(f"• 描述: {dryness.get('description', 'N/A')}")
+
+                        # 油腻评估
+                        oiliness = severity.get('oiliness', {})
+                        st.markdown("**油腻程度:**")
+                        st.write(f"• 等级: {oiliness.get('level', 'N/A')}")
+                        st.write(f"• 描述: {oiliness.get('description', 'N/A')}")
+
+                        # 敏感评估
+                        sensitivity = severity.get('sensitivity', {})
+                        st.markdown("**敏感程度:**")
+                        st.write(f"• 等级: {sensitivity.get('level', 'N/A')}")
+                        st.write(f"• 描述: {sensitivity.get('description', 'N/A')}")
+
+                # 显示详细发现
+                if 'detailed_findings' in detailed and detailed['detailed_findings']:
+                    with st.expander("📝 **详细发现 | Detailed Findings**", expanded=False):
+                        for finding in detailed['detailed_findings']:
+                            st.write(f"• {finding}")
 
             # 医学诊断（新增）
             if 'diagnosed_conditions' in result and result['diagnosed_conditions']:
@@ -509,12 +751,17 @@ with tab1:
             # 检测到的问题
             st.markdown("---")
             st.markdown("#### 🎯 Detected Issues | 检测到的问题")
-            for concern in result['concerns']:
-                st.warning(concern)
-            
+            concerns = result.get('concerns', [])
+            if concerns:
+                for concern in concerns:
+                    st.warning(concern)
+            else:
+                st.info("未发现明显问题 | No significant issues detected")
+
             # 护理建议
             st.markdown("#### 💡 Care Recommendations | 护理建议")
-            recommendations = get_care_recommendations(result['scalp_type'])
+            scalp_type = result.get('scalp_type', 'normal')
+            recommendations = get_care_recommendations(scalp_type)
             for rec in recommendations:
                 st.info(f"✓ {rec}")
         else:
@@ -533,8 +780,8 @@ with tab1:
         if not products_df.empty:
             # 获取推荐产品
             recommended = recommend_products(
-                result['scalp_type'],
-                result['concerns'],
+                result.get('scalp_type', 'normal'),
+                result.get('concerns', []),
                 products_df,
                 top_n=3
             )

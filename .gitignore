@@ -68,3 +68,11 @@ temp/
 # Test files with real keys
 test_claude_api_local.py
 test_with_real_key.py
+test_*.py
+check_*.py
+diagnose_*.py
+
+# Temporary files
+*.tmp
+*.tmp.*
+=*

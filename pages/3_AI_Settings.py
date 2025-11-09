@@ -271,19 +271,38 @@ with st.expander("🧪 Test AI Connection", expanded=False):
                                     from openai import OpenAI
                                     client = OpenAI(api_key=openai_key)
 
-                                    # 发送测试请求
-                                    response = client.chat.completions.create(
-                                        model="gpt-4",
-                                        messages=[
-                                            {"role": "user", "content": "Say 'API test successful'"}
-                                        ],
-                                        max_tokens=20
-                                    )
+                                    # 尝试多个模型进行测试
+                                    models_to_test = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+                                    success = False
+                                    used_model = None
 
-                                    result = response.choices[0].message.content
-                                    st.success("✅ OpenAI API连接成功!")
-                                    st.info(f"测试响应: {result}")
-                                    st.balloons()
+                                    for model in models_to_test:
+                                        try:
+                                            response = client.chat.completions.create(
+                                                model=model,
+                                                messages=[
+                                                    {"role": "user", "content": "Say 'API test successful'"}
+                                                ],
+                                                max_tokens=20
+                                            )
+                                            result = response.choices[0].message.content
+                                            used_model = model
+                                            success = True
+                                            break
+                                        except Exception as e:
+                                            if "model_not_found" in str(e) or "does not exist" in str(e):
+                                                continue
+                                            else:
+                                                raise e
+
+                                    if success:
+                                        st.success(f"✅ OpenAI API连接成功! (使用模型: {used_model})")
+                                        st.info(f"测试响应: {result}")
+                                        st.balloons()
+                                    else:
+                                        st.error("❌ 所有测试的模型都不可用")
+                                        st.warning("您的账户可能没有访问这些模型的权限")
+
                                 except Exception as api_error:
                                     st.error(f"❌ API连接失败: {str(api_error)}")
                                     with st.expander("查看详细错误"):

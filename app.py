@@ -379,58 +379,125 @@ with tab1:
             image = Image.open(uploaded_file)
             st.image(image, caption="Uploaded Image | 上传的照片", use_container_width=True)
 
-            # 添加Claude快速配置选项
+            # 添加AI配置选项
             st.markdown("---")
             st.markdown("### 🤖 AI分析选项 | AI Analysis Options")
 
-            # 快速Claude API配置
-            use_claude_directly = st.checkbox("🚀 **使用Claude直接分析** (获得最精准的医学诊断)", value=False)
+            # AI服务选择 - 默认启用
+            use_ai = st.checkbox("🚀 **使用AI增强分析** (获得最精准的医学诊断)", value=True)
 
-            if use_claude_directly:
-                # 检查是否已有API密钥
-                existing_key = st.session_state.get('ai_config', {}).get('claude_api_key', '')
+            if use_ai:
+                # 选择AI服务 - GPT-4 为默认选项
+                ai_service = st.radio(
+                    "选择AI服务 | Select AI Service",
+                    ["GPT-4 (OpenAI)", "Claude (Anthropic)"],
+                    index=0,  # GPT-4 为默认选项
+                    help="GPT-4o: 最新的OpenAI模型，视觉分析能力强 | Claude: Anthropic的医学分析专家",
+                    horizontal=True
+                )
 
-                if not existing_key:
-                    st.warning("请输入您的Claude API密钥以使用AI增强分析")
-                    claude_api_key = st.text_input(
-                        "Claude API密钥",
-                        type="password",
-                        placeholder="sk-ant-api03-...",
-                        help="获取密钥: https://console.anthropic.com/"
-                    )
+                # 根据选择的服务配置API密钥
+                if ai_service == "GPT-4 (OpenAI)":
+                    # GPT-4 配置 - 先尝试从环境变量加载
+                    existing_key = st.session_state.get('ai_config', {}).get('openai_api_key', '') or os.getenv('OPENAI_API_KEY', '')
 
-                    if claude_api_key:
-                        # 保存API密钥到session
-                        if 'ai_config' not in st.session_state:
-                            st.session_state['ai_config'] = {}
-                        st.session_state['ai_config']['claude_api_key'] = claude_api_key
+                    if not existing_key:
+                        st.warning("请输入您的 OpenAI API 密钥")
+                        openai_api_key = st.text_input(
+                            "OpenAI API密钥",
+                            type="password",
+                            placeholder="sk-...",
+                            help="获取密钥: https://platform.openai.com/api-keys"
+                        )
+
+                        if openai_api_key:
+                            # 保存API密钥到session
+                            if 'ai_config' not in st.session_state:
+                                st.session_state['ai_config'] = {}
+                            st.session_state['ai_config']['openai_api_key'] = openai_api_key
+                            st.session_state['ai_config']['enable_ai'] = True
+                            st.session_state['ai_config']['service'] = 'GPT-4 Vision (OpenAI)'
+                            st.session_state['ai_config']['combine_results'] = False
+                            st.session_state['ai_config']['language'] = 'zh'
+                            st.success("✅ GPT-4 API密钥已配置")
+                    else:
+                        st.success(f"✅ 已配置 GPT-4 API (密钥: {existing_key[:20]}...)")
+                        # 确保使用GPT-4
+                        st.session_state['ai_config']['enable_ai'] = True
+                        st.session_state['ai_config']['service'] = 'GPT-4 Vision (OpenAI)'
+                        st.session_state['ai_config']['combine_results'] = False
+
+                elif ai_service == "Claude (Anthropic)":
+                    # Claude 配置 - 先尝试从环境变量加载
+                    existing_key = st.session_state.get('ai_config', {}).get('claude_api_key', '') or os.getenv('ANTHROPIC_API_KEY', '')
+
+                    if not existing_key:
+                        st.warning("请输入您的 Claude API 密钥")
+                        claude_api_key = st.text_input(
+                            "Claude API密钥",
+                            type="password",
+                            placeholder="sk-ant-api03-...",
+                            help="获取密钥: https://console.anthropic.com/"
+                        )
+
+                        if claude_api_key:
+                            # 保存API密钥到session
+                            if 'ai_config' not in st.session_state:
+                                st.session_state['ai_config'] = {}
+                            st.session_state['ai_config']['claude_api_key'] = claude_api_key
+                            st.session_state['ai_config']['enable_ai'] = True
+                            st.session_state['ai_config']['service'] = 'Claude (Anthropic)'
+                            st.session_state['ai_config']['combine_results'] = False
+                            st.session_state['ai_config']['language'] = 'zh'
+                            st.success("✅ Claude API密钥已配置")
+                    else:
+                        st.success(f"✅ 已配置 Claude API (密钥: {existing_key[:20]}...)")
+                        # 确保使用Claude
                         st.session_state['ai_config']['enable_ai'] = True
                         st.session_state['ai_config']['service'] = 'Claude (Anthropic)'
-                        st.session_state['ai_config']['combine_results'] = False  # 只用Claude结果
-                        st.session_state['ai_config']['language'] = 'zh'
-                        st.success("✅ Claude API密钥已配置")
-                else:
-                    st.success(f"✅ 已配置Claude API (密钥: {existing_key[:20]}...)")
-                    # 确保使用Claude
-                    st.session_state['ai_config']['enable_ai'] = True
-                    st.session_state['ai_config']['service'] = 'Claude (Anthropic)'
-                    st.session_state['ai_config']['combine_results'] = False  # 只用Claude结果
+                        st.session_state['ai_config']['combine_results'] = False
 
             # 显示AI配置状态（调试信息）
             st.markdown("---")
+
+            # 添加调试模式开关
+            debug_mode = st.checkbox("🐛 启用调试模式 (Debug Mode)", value=False,
+                                    help="显示详细的 AI 分析过程和原始响应")
+
             with st.expander("🔍 AI配置状态 | AI Configuration Status", expanded=False):
                 ai_config = st.session_state.get('ai_config', {})
                 st.write(f"**AI启用状态**: {'✅ 已启用' if ai_config.get('enable_ai', False) else '❌ 未启用'}")
                 st.write(f"**选择的服务**: {ai_config.get('service', '未设置')}")
-                st.write(f"**API密钥已配置**: {'✅ 是' if ai_config.get('claude_api_key', '') else '❌ 否'}")
-                if ai_config.get('claude_api_key', ''):
-                    st.write(f"**密钥预览**: {ai_config.get('claude_api_key', '')[:25]}...")
+
+                # 显示正确的 API 密钥状态
+                has_openai = bool(ai_config.get('openai_api_key', ''))
+                has_claude = bool(ai_config.get('claude_api_key', ''))
+                st.write(f"**OpenAI API密钥**: {'✅ 已配置' if has_openai else '❌ 未配置'}")
+                st.write(f"**Claude API密钥**: {'✅ 已配置' if has_claude else '❌ 未配置'}")
+
+                if has_openai:
+                    st.write(f"**OpenAI密钥预览**: {ai_config.get('openai_api_key', '')[:25]}...")
+                if has_claude:
+                    st.write(f"**Claude密钥预览**: {ai_config.get('claude_api_key', '')[:25]}...")
+
                 st.write(f"**分析语言**: {ai_config.get('language', 'zh')}")
                 st.write(f"**合并本地分析**: {'是' if ai_config.get('combine_results', False) else '否'}")
+                st.write(f"**调试模式**: {'✅ 开启' if debug_mode else '❌ 关闭'}")
+
+            # 保存调试模式到 session
+            if 'ai_config' not in st.session_state:
+                st.session_state['ai_config'] = {}
+            st.session_state['ai_config']['debug_mode'] = debug_mode
 
             # 分析按钮 - 允许重新分析
             button_text = "🔄 Re-analyze | 重新分析" if st.session_state.get('analyzed', False) else "🚀 Start AI Analysis | 开始AI分析"
-            if st.button(button_text, type="primary", disabled=(use_claude_directly and not st.session_state.get('ai_config', {}).get('claude_api_key'))):
+
+            # 检查是否配置了API密钥
+            ai_config = st.session_state.get('ai_config', {})
+            has_api_key = ai_config.get('claude_api_key') or ai_config.get('openai_api_key')
+            button_disabled = use_ai and not has_api_key
+
+            if st.button(button_text, type="primary", disabled=button_disabled):
                 with st.spinner("正在分析您的头皮状况... | Analyzing your scalp condition..."):
                     # Check if AI service is enabled
                     ai_config = st.session_state.get('ai_config', {})
@@ -438,16 +505,21 @@ with tab1:
                     result = None  # 初始化结果
 
                     # 如果启用了AI服务，优先使用AI分析
-                    if ai_config.get('enable_ai', False) and ai_config.get('claude_api_key'):
+                    if ai_config.get('enable_ai', False):
                         service_type = ai_config.get('service', 'Claude (Anthropic)')
 
                         # 显示分析进度
                         progress_text = st.empty()
-                        progress_text.text("🤖 正在使用Claude AI进行深度分析...")
+
+                        # 根据服务类型获取正确的API密钥
+                        if service_type == 'GPT-4 Vision (OpenAI)':
+                            api_key = ai_config.get('openai_api_key', '')
+                            progress_text.text("🤖 正在使用 GPT-4o 进行深度分析...")
+                        else:
+                            api_key = ai_config.get('claude_api_key', '')
+                            progress_text.text("🤖 正在使用 Claude AI 进行深度分析...")
 
                         try:
-                            api_key = ai_config.get('claude_api_key', '')
-
                             if api_key:
                                 # Create AI service
                                 ai_service = AIServiceManager.create_service(service_type, api_key)
@@ -455,21 +527,72 @@ with tab1:
                                 if ai_service:
                                     # Get AI analysis
                                     language = ai_config.get('language', 'zh')
+
+                                    # 调试信息
+                                    if ai_config.get('debug_mode', False):
+                                        st.info(f"🔧 调试: 正在调用 {service_type}")
+                                        st.info(f"🔧 调试: 语言设置 = {language}")
+
                                     ai_result = ai_service.analyze_scalp_image(image, language)
 
-                                    # 如果不合并结果，直接使用Claude结果
+                                    # 保存调试信息到 session
+                                    if ai_config.get('debug_mode', False):
+                                        st.session_state['debug_ai_result'] = ai_result
+                                        st.session_state['debug_service'] = service_type
+
+                                    # 如果不合并结果，直接使用AI结果
                                     if not ai_config.get('combine_results', False):
-                                        result = ai_result
+                                        result = ai_result.copy()
+
+                                        # Map AI conditions to diagnosed_conditions and normalize
+                                        if 'conditions' in result:
+                                            from utils.ai_services import AIServiceManager
+                                            normalized_conditions = [
+                                                AIServiceManager._normalize_condition(cond)
+                                                for cond in result.get('conditions', [])
+                                            ]
+                                            result['diagnosed_conditions'] = normalized_conditions
+
+                                        # Map recommendations to concerns
+                                        if 'recommendations' in result:
+                                            result['concerns'] = result['recommendations']
+
+                                        # Calculate overall confidence from diagnosed conditions
+                                        if 'diagnosed_conditions' in result and result['diagnosed_conditions']:
+                                            # Calculate average confidence from all diagnosed conditions
+                                            confidences = [
+                                                cond.get('confidence', 0)
+                                                for cond in result['diagnosed_conditions']
+                                            ]
+                                            if confidences:
+                                                result['confidence'] = int(sum(confidences) / len(confidences))
+                                            else:
+                                                result['confidence'] = 0
+                                        else:
+                                            result['confidence'] = 0
+
                                         result['ai_service_used'] = service_type
-                                        result['analysis_method'] = 'Claude AI Direct Analysis'
-                                        progress_text.text("✅ Claude AI分析完成！")
+                                        result['debug_mode'] = ai_config.get('debug_mode', False)
+
+                                        # 根据服务类型设置分析方法
+                                        if service_type == 'GPT-4 Vision (OpenAI)':
+                                            result['analysis_method'] = 'GPT-4o Direct Analysis'
+                                            progress_text.text("✅ GPT-4o 分析完成！")
+                                        else:
+                                            result['analysis_method'] = 'Claude AI Direct Analysis'
+                                            progress_text.text("✅ Claude AI 分析完成！")
                                     else:
                                         # 合并本地和AI结果
                                         progress_text.text("🔄 正在执行本地分析...")
                                         local_result = analyze_scalp_image(image)
                                         result = AIServiceManager.combine_analyses(ai_result, local_result)
                                         result['ai_service_used'] = service_type
-                                        result['analysis_method'] = 'Claude AI + Local Combined'
+
+                                        # 根据服务类型设置分析方法
+                                        if service_type == 'GPT-4 Vision (OpenAI)':
+                                            result['analysis_method'] = 'GPT-4o + Local Combined'
+                                        else:
+                                            result['analysis_method'] = 'Claude AI + Local Combined'
                                         progress_text.text("✅ 综合分析完成！")
                                 else:
                                     progress_text.text("⚠️ AI服务不可用，使用本地分析...")
@@ -482,30 +605,59 @@ with tab1:
 
                             # 提供具体的错误建议
                             if "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
-                                st.warning("🔑 API密钥问题：请检查您的Claude API密钥是否正确")
-                                st.info("💡 获取API密钥: https://console.anthropic.com/")
+                                st.warning("🔑 API密钥问题：请检查您的 API 密钥是否正确")
+                                if service_type == 'GPT-4 Vision (OpenAI)':
+                                    st.info("💡 获取 OpenAI API密钥: https://platform.openai.com/api-keys")
+                                    st.info("💡 检查账户余额: https://platform.openai.com/usage")
+                                else:
+                                    st.info("💡 获取 Claude API密钥: https://console.anthropic.com/")
                             elif "rate" in error_msg.lower() or "quota" in error_msg.lower():
-                                st.warning("⏰ API配额问题：您的API配额可能已用完，请检查账户余额")
+                                st.warning("⏰ API配额问题：您的API配额可能已用完")
+                                st.info("💡 请充值或检查账户余额")
+                            elif "model" in error_msg.lower():
+                                st.warning("🤖 模型访问问题：您可能没有访问此模型的权限")
+                                st.info("💡 确认账户已升级到付费版并有 GPT-4 访问权限")
                             elif "network" in error_msg.lower() or "connection" in error_msg.lower():
                                 st.warning("🌐 网络连接问题：请检查网络连接是否正常")
                             else:
-                                st.warning("⚠️ 未知错误：请查看错误详情或联系技术支持")
+                                st.warning("⚠️ 未知错误：请查看错误详情")
 
                             # 显示详细错误（可展开）
-                            with st.expander("查看详细错误信息"):
+                            with st.expander("🔍 查看详细错误信息和完整堆栈", expanded=True):
                                 st.code(error_msg)
+                                st.markdown("**解决建议：**")
+                                st.markdown("1. 检查 API 密钥是否正确（无多余空格）")
+                                st.markdown("2. 确认账户有余额")
+                                st.markdown("3. 尝试切换到其他 AI 服务")
+                                st.markdown("4. 如果问题持续，使用本地分析")
 
-                            progress_text.text("⚠️ AI分析失败，正在使用本地分析...")
-                            result = analyze_scalp_image(image)
-                            result['ai_error'] = error_msg
-                            result['analysis_method'] = 'Local Analysis (Error Fallback)'
+                            # 创建错误结果，不自动回退到本地分析
+                            progress_text.text("❌ AI分析失败")
+                            result = {
+                                'scalp_type': 'API Error',
+                                'diagnosed_conditions': [],
+                                'concerns': [
+                                    f"❌ AI分析失败: {error_msg[:100]}...",
+                                    "请检查 API 密钥和账户余额",
+                                    "或尝试使用其他 AI 服务"
+                                ],
+                                'confidence': 0,
+                                'health_score': 0,
+                                'recommendations': [
+                                    "检查 API 配置",
+                                    "尝试切换 AI 服务",
+                                    "或取消勾选 'AI 增强分析' 使用本地分析"
+                                ],
+                                'ai_error': error_msg,
+                                'analysis_method': 'AI Analysis Failed'
+                            }
                     else:
                         # 没有配置AI，使用本地分析
                         result = analyze_scalp_image(image)
                         result['analysis_method'] = 'Local Analysis Only'
 
-                        if use_claude_directly:
-                            st.warning("请先配置Claude API密钥才能使用AI分析")
+                        if use_ai:
+                            st.warning("请先配置 API 密钥才能使用 AI 分析")
 
                     # 保存分析历史到数据库
                     scalp_type = result.get('scalp_type', 'normal')
@@ -542,18 +694,133 @@ with tab1:
             # 显示分析结果
             st.success("✅ Analysis Complete! | 分析完成！")
 
-            # 显示分析方法
+            # 显示调试信息（在最顶部，不会被刷新隐藏）
+            if result.get('debug_mode', False) and 'debug_ai_result' in st.session_state:
+                st.markdown("---")
+                with st.expander("🐛 **调试: AI 完整返回数据**", expanded=True):
+                    st.write(f"**使用的服务**: {st.session_state.get('debug_service', 'Unknown')}")
+                    st.write(f"**返回时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    st.markdown("**完整 JSON 数据：**")
+                    st.json(st.session_state['debug_ai_result'])
+
+                    # 提取关键字段显示
+                    debug_result = st.session_state['debug_ai_result']
+                    st.markdown("**关键字段：**")
+                    col_d1, col_d2, col_d3 = st.columns(3)
+                    with col_d1:
+                        st.metric("Scalp Type", debug_result.get('scalp_type', 'N/A'))
+                    with col_d2:
+                        st.metric("Health Score", f"{debug_result.get('health_score', 0)}/100")
+                    with col_d3:
+                        st.metric("Conditions", len(debug_result.get('conditions', [])))
+
+                    # Display calculated overall confidence
+                    st.markdown("---")
+                    st.markdown("**🎯 计算后的整体置信度：**")
+                    st.info(f"Overall Confidence (calculated from conditions): **{result.get('confidence', 0)}%**")
+
+                    # 显示每个 condition 的 confidence
+                    if debug_result.get('conditions'):
+                        st.markdown("**Conditions 详细信息（原始数据）：**")
+                        for i, cond in enumerate(debug_result.get('conditions', []), 1):
+                            with st.expander(f"Condition {i}: {cond.get('name_cn', 'N/A')}", expanded=False):
+                                st.write(f"**Name (CN)**: {cond.get('name_cn', 'N/A')}")
+                                st.write(f"**Name (EN)**: {cond.get('name_en', 'N/A')}")
+                                st.write(f"**Severity**: {cond.get('severity', 'N/A')}")
+                                st.write(f"**Confidence (原始值)**: {cond.get('confidence', 'MISSING')} (类型: {type(cond.get('confidence')).__name__})")
+                                st.write(f"**Description**: {cond.get('description', 'N/A')[:100]}...")
+                st.markdown("---")
+
+            # 显示分析方法和使用的模型
             if 'analysis_method' in result:
-                if 'Claude' in result['analysis_method']:
+                if 'GPT-4' in result['analysis_method']:
+                    # 显示使用的具体模型
+                    if 'model_display_name' in result:
+                        st.info(f"🤖 **分析方法**: {result['analysis_method']} | 模型: {result['model_display_name']}")
+                    else:
+                        st.info(f"🤖 **分析方法**: {result['analysis_method']}")
+                    st.markdown("*OpenAI GPT 提供专业的医学级视觉分析结果*")
+                elif 'Claude' in result['analysis_method']:
                     st.info(f"🤖 **分析方法**: {result['analysis_method']}")
-                    st.markdown("*Claude AI提供专业的医学级分析结果*")
+                    st.markdown("*Claude AI 提供专业的医学级分析结果*")
                 else:
                     st.info(f"🔬 **分析方法**: {result['analysis_method']}")
 
-            # 如果是Claude直接分析，显示AI的详细响应
-            if 'ai_service_used' in result and result.get('ai_service_used') == 'Claude (Anthropic)':
-                if 'ai_raw_response' in result:
-                    with st.expander("🤖 **Claude AI原始分析结果**", expanded=False):
+            # 显示AI综合分析总结
+            if 'analysis_summary' in result and result['analysis_summary']:
+                st.markdown("---")
+                st.markdown("#### 📊 综合分析报告 | Comprehensive Analysis")
+                st.success(result['analysis_summary'])
+
+            # 显示头皮分区分析（新增）
+            if 'scalp_zone_analysis' in result and result['scalp_zone_analysis']:
+                st.markdown("---")
+                st.markdown("#### 🗺️ 头皮分区分析 | Scalp Zone Analysis")
+                zones = result['scalp_zone_analysis']
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if 'frontal' in zones and zones['frontal']:
+                        with st.expander("📍 前额区域 (Frontal)", expanded=False):
+                            st.write(zones['frontal'])
+                    if 'vertex' in zones and zones['vertex']:
+                        with st.expander("📍 头顶区域 (Vertex)", expanded=False):
+                            st.write(zones['vertex'])
+                with col2:
+                    if 'temporal' in zones and zones['temporal']:
+                        with st.expander("📍 颞部区域 (Temporal)", expanded=False):
+                            st.write(zones['temporal'])
+                    if 'occipital' in zones and zones['occipital']:
+                        with st.expander("📍 枕部区域 (Occipital)", expanded=False):
+                            st.write(zones['occipital'])
+
+            # 显示评分细分（新增）
+            if 'score_breakdown' in result and result['score_breakdown']:
+                st.markdown("---")
+                st.markdown("#### 📈 健康评分细分 | Score Breakdown")
+                breakdown = result['score_breakdown']
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    score1 = breakdown.get('scalp_condition', 'N/A')
+                    st.metric("头皮状态", f"{score1}/30")
+                with col2:
+                    score2 = breakdown.get('hair_health', 'N/A')
+                    st.metric("毛发健康", f"{score2}/30")
+                with col3:
+                    score3 = breakdown.get('inflammation', 'N/A')
+                    st.metric("炎症情况", f"{score3}/20")
+                with col4:
+                    score4 = breakdown.get('overall_hygiene', 'N/A')
+                    st.metric("整体卫生", f"{score4}/20")
+
+            # 显示建议的进一步检查（新增）
+            if 'suggested_tests' in result and result['suggested_tests']:
+                st.markdown("---")
+                st.markdown("#### 🔬 建议的进一步检查 | Suggested Tests")
+                for i, test in enumerate(result['suggested_tests'], 1):
+                    st.info(f"{i}. {test}")
+
+            # 显示紧急程度（新增）
+            if 'urgency_level' in result and result['urgency_level']:
+                urgency = result['urgency_level']
+                st.markdown("---")
+                if urgency == '紧急':
+                    st.error(f"⚠️ **就医建议**: {urgency} - 请立即前往医院皮肤科就诊")
+                elif urgency == '尽快':
+                    st.warning(f"⚡ **就医建议**: {urgency} - 建议尽快预约皮肤科医生")
+                elif urgency == '建议':
+                    st.info(f"ℹ️ **就医建议**: {urgency} - 建议咨询专业医生")
+                else:
+                    st.success(f"✅ **就医建议**: {urgency} - 继续观察，注意日常护理")
+
+            # 如果是AI直接分析，显示AI的详细响应
+            if 'ai_service_used' in result:
+                if result.get('ai_service_used') == 'Claude (Anthropic)' and 'ai_raw_response' in result:
+                    with st.expander("🤖 **Claude AI 原始分析结果**", expanded=False):
+                        st.markdown(result.get('ai_raw_response', ''))
+                elif result.get('ai_service_used') == 'GPT-4 Vision (OpenAI)' and 'ai_raw_response' in result:
+                    with st.expander("🤖 **GPT-4o 原始分析结果**", expanded=False):
                         st.markdown(result.get('ai_raw_response', ''))
 
             # 头皮类型和置信度
@@ -709,6 +976,16 @@ with tab1:
                 st.markdown("---")
                 st.markdown("#### 🩺 Medical Diagnosis | 医学诊断")
 
+                # DEBUG: Show diagnosed_conditions data
+                if result.get('debug_mode', False):
+                    with st.expander("🔍 DEBUG: diagnosed_conditions 原始数据", expanded=False):
+                        for i, cond in enumerate(result['diagnosed_conditions'], 1):
+                            st.write(f"**Condition {i}:**")
+                            st.write(f"- confidence 值: {cond.get('confidence', 'MISSING')} (类型: {type(cond.get('confidence')).__name__})")
+                            st.write(f"- name_cn: {cond.get('name_cn', 'N/A')}")
+                            st.json(cond)
+                            st.markdown("---")
+
                 for condition in result['diagnosed_conditions']:
                     # 严重程度颜色
                     severity_color = {
@@ -720,12 +997,56 @@ with tab1:
                     }.get(condition['severity'], 'info')
 
                     # 显示诊断卡片
-                    with st.expander(f"{condition['icon']} **{condition['name_cn']}** ({condition['name_en']}) - {condition['severity']}", expanded=True):
-                        st.markdown(f"**俗称：** {condition['common_name']}")
-                        st.markdown(f"**置信度：** {condition['confidence']}%")
-                        st.markdown(f"**描述：** {condition['description']}")
+                    confidence = condition.get('confidence', 0)
+
+                    # DEBUG: 在调试模式下显示confidence提取
+                    if result.get('debug_mode', False):
+                        import streamlit as st_debug
+                        st_debug.write(f"🔍 DEBUG 显示时: condition.get('confidence', 0) = {confidence}, 类型: {type(confidence).__name__}")
+                        st_debug.write(f"   原始 condition dict 的 confidence 键: {condition.get('confidence', 'KEY_NOT_FOUND')}")
+
+                    confidence_color = "🟢" if confidence >= 80 else "🟡" if confidence >= 60 else "🔴"
+
+                    with st.expander(f"{condition['icon']} **{condition['name_cn']}** ({condition['name_en']}) - {condition['severity']} {confidence_color}", expanded=True):
+                        # 基本信息
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**俗称：** {condition.get('common_name', condition.get('name_cn', 'N/A'))}")
+                            if 'icd10_code' in condition:
+                                st.markdown(f"**ICD-10编码：** {condition['icd10_code']}")
+                        with col2:
+                            st.markdown(f"**置信度：** {confidence}% {confidence_color}")
+                            if confidence >= 80:
+                                st.success("高度可信")
+                            elif confidence >= 60:
+                                st.warning("中度可信")
+                            else:
+                                st.error("低度可信")
+
+                        st.markdown("---")
+
+                        # 详细描述
+                        st.markdown(f"**📋 医学描述：**")
+                        st.info(condition.get('description', '无详细描述'))
+
+                        # 诊断证据（新增）
+                        if 'diagnostic_evidence' in condition and condition['diagnostic_evidence']:
+                            st.markdown("**🔍 诊断依据：**")
+                            st.success(condition['diagnostic_evidence'])
+
+                        # 观察到的症状
+                        if 'symptoms' in condition and condition['symptoms']:
+                            st.markdown("**👁️ 观察到的症状：**")
+                            for symptom in condition['symptoms']:
+                                st.write(f"• {symptom}")
+
+                        # 鉴别诊断（新增）
+                        if 'differential_diagnosis' in condition and condition['differential_diagnosis']:
+                            with st.expander("🔬 鉴别诊断", expanded=False):
+                                st.write(condition['differential_diagnosis'])
 
                         # 严重程度指示器
+                        st.markdown("---")
                         if condition['severity'] in ['重度', '晚期']:
                             st.error(f"⚠️ 严重程度：**{condition['severity']}** - 建议尽快就医")
                         elif condition['severity'] == '中度':

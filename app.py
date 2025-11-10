@@ -398,16 +398,23 @@ with tab1:
 
                 # 根据选择的服务配置API密钥
                 if ai_service == "GPT-4 (OpenAI)":
-                    # GPT-4 配置 - 先尝试从环境变量加载
-                    existing_key = st.session_state.get('ai_config', {}).get('openai_api_key', '') or os.getenv('OPENAI_API_KEY', '')
+                    # GPT-4 配置 - 按优先级尝试加载密钥
+                    # 1. 从 Streamlit secrets 读取（本地开发和云部署）
+                    # 2. 从环境变量读取
+                    # 3. 从 session_state 读取（用户手动输入）
+                    existing_key = (
+                        st.secrets.get("OPENAI_API_KEY", "") or
+                        os.getenv('OPENAI_API_KEY', '') or
+                        st.session_state.get('ai_config', {}).get('openai_api_key', '')
+                    )
 
                     if not existing_key:
-                        st.warning("请输入您的 OpenAI API 密钥")
+                        st.warning("⚠️ 请输入您的 OpenAI API 密钥 | 或在 .streamlit/secrets.toml 中配置永久保存")
                         openai_api_key = st.text_input(
                             "OpenAI API密钥",
                             type="password",
                             placeholder="sk-...",
-                            help="获取密钥: https://platform.openai.com/api-keys"
+                            help="获取密钥: https://platform.openai.com/api-keys\n\n💡 提示：可在 .streamlit/secrets.toml 中永久保存密钥"
                         )
 
                         if openai_api_key:
@@ -421,7 +428,18 @@ with tab1:
                             st.session_state['ai_config']['language'] = 'zh'
                             st.success("✅ GPT-4 API密钥已配置")
                     else:
-                        st.success(f"✅ 已配置 GPT-4 API (密钥: {existing_key[:20]}...)")
+                        # 显示密钥来源
+                        if st.secrets.get("OPENAI_API_KEY", ""):
+                            st.success(f"✅ GPT-4 API已就绪 (来源: secrets.toml) | 密钥: {existing_key[:20]}...")
+                        elif os.getenv('OPENAI_API_KEY', ''):
+                            st.success(f"✅ GPT-4 API已就绪 (来源: 环境变量) | 密钥: {existing_key[:20]}...")
+                        else:
+                            st.success(f"✅ GPT-4 API已就绪 (来源: 手动输入) | 密钥: {existing_key[:20]}...")
+
+                        # 存储到 session_state
+                        if 'ai_config' not in st.session_state:
+                            st.session_state['ai_config'] = {}
+                        st.session_state['ai_config']['openai_api_key'] = existing_key
                         # 确保使用GPT-4
                         st.session_state['ai_config']['enable_ai'] = True
                         st.session_state['ai_config']['service'] = 'GPT-4 Vision (OpenAI)'
@@ -453,6 +471,9 @@ with tab1:
                     else:
                         st.success(f"✅ 已配置 Claude API (密钥: {existing_key[:20]}...)")
                         # 确保使用Claude
+                        if 'ai_config' not in st.session_state:
+                            st.session_state['ai_config'] = {}
+                        st.session_state['ai_config']['claude_api_key'] = existing_key
                         st.session_state['ai_config']['enable_ai'] = True
                         st.session_state['ai_config']['service'] = 'Claude (Anthropic)'
                         st.session_state['ai_config']['combine_results'] = False

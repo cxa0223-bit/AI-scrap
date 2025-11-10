@@ -8,5 +8,4 @@ scikit-learn>=1.5.0
 matplotlib>=3.9.0
 
 # AI Service Libraries
-anthropic>=0.7.0
 openai>=1.40.0

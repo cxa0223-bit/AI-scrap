@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 AI Services Integration Module
 Supports Claude API, OpenAI Vision API, and other AI services
@@ -13,13 +14,7 @@ from PIL import Image
 import io
 import streamlit as st
 
-# Try to import optional libraries
-try:
-    from anthropic import Anthropic
-    CLAUDE_AVAILABLE = True
-except ImportError:
-    CLAUDE_AVAILABLE = False
-
+# Import OpenAI library
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
@@ -35,290 +30,6 @@ class AIServiceBase:
     def analyze_scalp_image(self, image: Image.Image, language: str = 'zh') -> Dict:
         """Analyze scalp image using AI service"""
         raise NotImplementedError
-
-class ClaudeService(AIServiceBase):
-    """Claude AI service for scalp analysis"""
-
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        if not CLAUDE_AVAILABLE:
-            raise ImportError("Please install anthropic: pip install anthropic")
-        self.client = Anthropic(api_key=api_key)
-
-    def analyze_scalp_image(self, image: Image.Image, language: str = 'zh') -> Dict:
-        """Use Claude to analyze scalp image"""
-
-        # Convert image to base64
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_base64 = base64.b64encode(buffered.getvalue()).decode()
-
-        # Create enhanced professional prompt
-        if language == 'zh':
-            prompt = """
-            你是一位具有15年临床经验的皮肤科主任医师，专攻头皮疾病诊断和毛发医学。请以医学专家的标准对这张头皮图像进行深度分析。
-
-            **🔬 临床分析框架**（必须按此顺序）：
-
-            **1️⃣ 系统性视觉检查**（逐项记录观察结果）：
-            - 头皮颜色：正常粉红/充血红/苍白/黄色/色素沉着
-            - 皮脂状态：干燥/正常/油腻/过度油腻（T区和枕部分别评估）
-            - 鳞屑特征：无/细小白色/大片银白/黄色油腻/厚层痂皮
-            - 炎症程度：无/轻度红斑/中度丘疹/重度脓疱/结节
-            - 毛囊情况：开放通畅/轻度堵塞/明显角化/炎症/萎缩
-            - 发量密度：正常(>100根/cm²)/轻度稀疏(60-100)/中度(40-60)/重度(<40)
-            - 发干状态：健康有光泽/干燥/断裂/细软化/异常卷曲
-            - 头皮纹理：光滑/轻度粗糙/明显增厚/萎缩/瘢痕
-
-            **2️⃣ 疾病鉴别诊断**（使用临床诊断标准，提供鉴别依据）：
-
-            **脂溢性皮炎** (ICD-10: L21.0):
-            - 典型特征：黄色油腻性鳞屑、红斑、瘙痒、T区和耳后明显
-            - 鉴别要点：与银屑病的鳞屑颜色差异、分布部位
-
-            **银屑病/头皮型牛皮癣** (ICD-10: L40.0):
-            - 典型特征：银白色干燥鳞屑、边界清楚的红斑、Auspitz征
-            - 鉴别要点：鳞屑厚度、去除鳞屑后点状出血
-
-            **毛囊炎** (ICD-10: L73.9):
-            - 典型特征：毛囊口红色丘疹/脓疱、触痛、成簇分布
-            - 鉴别要点：细菌性vs真菌性（分布、脓疱大小）
-
-            **雄激素性脱发** (ICD-10: L64):
-            - 男性型（M型后退、头顶稀疏、Hamilton-Norwood分级）
-            - 女性型（顶部弥漫性稀疏、Ludwig分级）
-            - 微观特征：毛干直径缩小、毳毛增多
-
-            **斑秃** (ICD-10: L63):
-            - 典型特征：圆形/椭圆形脱发斑、边缘"感叹号"样毛发
-            - 活动期vs静止期判断
-
-            **头癣** (ICD-10: B35.0):
-            - 典型特征：鳞屑、断发、黑点、脱发斑、可能化脓
-            - 需排除其他鳞屑性疾病
-
-            **接触性皮炎** (ICD-10: L23):
-            - 急性期：红斑、水肿、渗出、水疱
-            - 慢性期：干燥、皲裂、苔藓化
-
-            **休止期脱发** (ICD-10: L65.0):
-            - 特征：弥漫性脱发、拉发试验阳性、无炎症
-            - 需询问诱因（应激、产后、疾病）
-
-            **3️⃣ 置信度评估标准**（必须提供依据）：
-            - **80-100%**：存在3个以上典型临床特征，符合诊断金标准
-            - **60-79%**：存在2个典型特征，但需排除其他可能
-            - **40-59%**：仅有1-2个提示性特征，需进一步检查
-            - **<40%**：仅有轻微可疑迹象，不足以确诊
-
-            **4️⃣ 健康评分体系**（严格按临床标准）：
-            - **95-100分**：完全健康，无任何异常（极少见）
-            - **85-94分**：轻微异常（轻度油脂/少量头屑，无需治疗）
-            - **70-84分**：轻度问题（需日常护理改善）
-            - **50-69分**：中度问题（建议专业治疗）
-            - **30-49分**：重度问题（需要及时就医）
-            - **0-29分**：严重疾病（急需皮肤科诊治）
-
-            **5️⃣ 专业治疗建议**（分级推荐）：
-            - 一线治疗：首选方案（药物名称、浓度、用法）
-            - 二线治疗：替代方案
-            - 辅助措施：生活方式、护理建议
-            - 禁忌事项：需要避免的行为或产品
-
-            **📋 JSON返回格式**（严格遵守）：
-            {
-                "scalp_type": "油性/干性/正常/混合/敏感",
-                "scalp_zone_analysis": {
-                    "frontal": "前额区域详细观察",
-                    "vertex": "头顶区域详细观察",
-                    "temporal": "颞部区域详细观察",
-                    "occipital": "枕部区域详细观察"
-                },
-                "conditions": [
-                    {
-                        "name_cn": "疾病中文名",
-                        "name_en": "Disease English Name",
-                        "icd10_code": "ICD-10编码",
-                        "severity": "轻度/中度/重度",
-                        "confidence": 置信度(0-100),
-                        "diagnostic_evidence": "支持该诊断的3-5个具体临床证据",
-                        "differential_diagnosis": "需要鉴别的2-3个疾病及鉴别要点",
-                        "symptoms": ["观察到的客观体征"],
-                        "description": "专业医学描述（含病理机制）"
-                    }
-                ],
-                "health_score": 评分(0-100),
-                "score_breakdown": {
-                    "scalp_condition": "头皮状态评分(0-30)",
-                    "hair_health": "毛发健康评分(0-30)",
-                    "inflammation": "炎症情况评分(0-20)",
-                    "overall_hygiene": "整体卫生评分(0-20)"
-                },
-                "recommendations": [
-                    {
-                        "category": "药物治疗/护理建议/生活方式",
-                        "priority": "高/中/低",
-                        "content": "具体建议内容",
-                        "evidence_level": "A/B/C级证据"
-                    }
-                ],
-                "need_doctor": true/false,
-                "urgency_level": "紧急/尽快/建议/观察",
-                "suggested_tests": ["建议进行的进一步检查（如真菌镜检、毛发镜检等）"],
-                "analysis_summary": "200-300字的专业综合评估报告"
-            }
-
-            **⚠️ 专业标准（必须遵守）**：
-            1. 使用循证医学证据，避免主观臆断
-            2. 置信度必须有明确的临床依据支持
-            3. 不确定时明确说明，不过度诊断
-            4. 建议必须符合最新临床指南
-            5. 严重情况必须建议就医，不可仅给护理建议
-            6. 如非头皮照片，返回错误格式（如之前定义）
-
-            **只返回JSON格式，无其他文字。**
-            """
-        else:
-            prompt = """
-            You are an experienced dermatologist specializing in scalp health diagnosis. Please carefully analyze this scalp image and provide a professional medical assessment.
-
-            **Analysis Requirements** (strictly follow):
-            1. Observe every detail in the image carefully
-            2. Do NOT easily judge as "completely normal" - point out any minor issues
-            3. Even for healthy scalps, indicate potential risk factors or improvement suggestions
-            4. Use professional medical terminology while explaining clearly
-
-            **Items to Check**:
-            1. Scalp color (normal/redness/pale/yellow)
-            2. Sebum secretion (excessive/normal/insufficient)
-            3. Dandruff condition (none/mild/moderate/severe)
-            4. Inflammation signs (erythema/papules/pustules)
-            5. Follicle status (healthy/clogged/inflamed)
-            6. Hair density (normal/sparse/loss)
-            7. Skin texture (smooth/rough/scaly)
-            8. Abnormal patches or lesions
-
-            **Conditions to Diagnose** (list at least potential risks):
-            - Seborrheic Dermatitis (oily scalp, yellow scales)
-            - Psoriasis (silvery scales, red patches)
-            - Folliculitis (red papules, pustules)
-            - Alopecia Areata (circular hair loss areas)
-            - Androgenetic Alopecia (thinning hair, fine texture)
-            - Tinea Capitis (fungal infection, scales, broken hair)
-            - Contact Dermatitis (allergy, itching)
-            - Telogen Effluvium (diffuse hair loss)
-            - Dry or sensitive scalp
-
-            **Health Score Standards** (strict scoring):
-            - 90-100: Extremely healthy scalp, no issues
-            - 70-89: Minor issues (mild oil, slight dandruff)
-            - 50-69: Moderate problems (obvious oil, moderate dandruff, mild inflammation)
-            - 30-49: Severe problems (heavy inflammation, hair loss, obvious lesions)
-            - 0-29: Extremely severe (immediate medical attention needed)
-
-            **Return Format** (must be valid JSON):
-            {
-                "scalp_type": "scalp type (oily/dry/normal/combination/sensitive)",
-                "conditions": [
-                    {
-                        "name_cn": "Chinese disease name",
-                        "name_en": "English Disease Name",
-                        "severity": "severity (mild/moderate/severe)",
-                        "confidence": confidence_number(0-100),
-                        "symptoms": ["specific observed symptom1", "symptom2", "symptom3"],
-                        "description": "detailed medical description, including reasoning"
-                    }
-                ],
-                "health_score": health_score(0-100, strict scoring),
-                "recommendations": ["specific treatment or care recommendation1", "recommendation2", "recommendation3"],
-                "need_doctor": true_or_false (whether medical consultation needed),
-                "analysis_summary": "comprehensive analysis summary, including main issues and overall assessment"
-            }
-
-            **Important Notes**:
-            - List any abnormalities, even if very minor
-            - Don't easily give 90+ scores, be strict in assessment
-            - Even for healthy-looking scalps, provide prevention advice
-            - Symptom descriptions should be specific, not vague
-            """
-
-        try:
-            # Call Claude API
-            message = self.client.messages.create(
-                model="claude-3-haiku-20240307",  # Claude 3 Haiku - 快速且经济
-                max_tokens=3000,  # 增加到3000，允许更详细的分析
-                temperature=0,  # 0表示最确定性的输出，适合医学诊断
-                system="You are a professional dermatologist specializing in scalp health analysis.",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": img_base64
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
-                    }
-                ]
-            )
-
-            # Parse response
-            response_text = message.content[0].text
-
-            # Try to extract JSON from response
-            try:
-                # Look for JSON in the response
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    result = json.loads(json_str)
-
-                    # Save raw response for debugging
-                    result['ai_raw_response'] = response_text
-                else:
-                    # If no JSON found, create structured response
-                    result = {
-                        "scalp_type": "Unknown",
-                        "conditions": [],
-                        "health_score": 50,
-                        "recommendations": [response_text],
-                        "need_doctor": False,
-                        "analysis_summary": response_text,
-                        "ai_raw_response": response_text
-                    }
-            except json.JSONDecodeError as e:
-                result = {
-                    "scalp_type": "Analysis Complete",
-                    "conditions": [],
-                    "health_score": 50,
-                    "recommendations": [response_text],
-                    "need_doctor": False,
-                    "analysis_summary": response_text,
-                    "ai_raw_response": response_text,
-                    "parse_error": str(e)
-                }
-
-            return result
-
-        except Exception as e:
-            return {
-                "error": f"Claude API error: {str(e)}",
-                "scalp_type": "Error",
-                "conditions": [],
-                "health_score": 0,
-                "recommendations": ["Unable to analyze image"],
-                "need_doctor": False,
-                "analysis_summary": f"Error: {str(e)}"
-            }
 
 class OpenAIService(AIServiceBase):
     """OpenAI GPT-4 Vision service for scalp analysis"""
@@ -372,23 +83,72 @@ class OpenAIService(AIServiceBase):
         # Create prompt based on language (使用与Claude相同的详细prompt)
         if language == 'zh':
             prompt = """
-            你是一位经验丰富的皮肤科医生，专门从事头皮健康诊断。请仔细分析这张头皮图像，进行专业的医学评估。
+            你是一位具有20年临床经验的皮肤科主任医师和毛发病理学专家，专攻头皮疾病诊断、毛囊显微分析和毛发医学。请以最高医学标准对这张头皮图像进行深度分析。
+
+            **🔬 图像类型识别**（重要！）：
+            本系统接受以下类型的头皮图像，请先识别图像类型：
+
+            1. **显微镜放大图/特写镜头**（放大倍数：10x-200x）
+               - 特征：可以清楚看到毛囊口、皮脂、角质细节、微小鳞屑
+               - 分析重点：毛囊堵塞、角质堆积、皮脂状态、微观炎症、细小皮屑
+               - 这是**有效的头皮图像**，必须进行详细分析！
+
+            2. **常规头皮照片**（正常距离拍摄）
+               - 特征：能看到整体头皮区域、发际线、头发分布
+               - 分析重点：整体色调、大面积红斑、发量密度、明显鳞屑
+
+            3. **无效图像**（非头皮照片）
+               - 如果图像完全不是头皮或头发相关（如风景、物品、其他身体部位等），
+                 才返回错误格式
+
+            ⚠️ **关键提示**：
+            - 显微镜头皮图/特写镜头是**完全有效**的头皮图像，必须分析！
+            - 不要因为图像是放大图就认为"无法识别"
+            - 显微镜图能看到更多细节，反而更有利于精准诊断
 
             **分析要求**（请严格遵守）：
-            1. 仔细观察图像的每个细节
+            1. 仔细观察图像的每个细节（无论是显微镜图还是常规照片）
             2. 不要轻易判断为"完全正常"，任何轻微问题都应该指出
             3. 即使是健康的头皮，也要指出可能的风险因素或改善建议
             4. 使用专业医学术语，同时解释清楚
+            5. **对于显微镜图像，要特别关注微观特征**（毛囊口状态、角质颗粒、皮脂质地等）
 
-            **必须检查的项目**：
-            1. 头皮颜色（正常/发红/苍白/黄色）
-            2. 皮脂分泌（过多/正常/过少）
-            3. 头屑情况（无/轻度/中度/严重）
+            **必须检查的项目**（根据图像类型选择重点）：
+
+            **常规照片检查项**：
+            1. 头皮颜色（正常粉红/潮红/苍白/黄褐色）
+            2. 皮脂分泌整体状态（过多/正常/过少）
+            3. 可见头屑情况（无/轻度/中度/严重）
             4. 炎症迹象（红斑/丘疹/脓疱）
-            5. 毛囊状态（健康/堵塞/发炎）
-            6. 头发密度（正常/稀疏/脱落）
-            7. 皮肤纹理（光滑/粗糙/鳞屑）
-            8. 异常斑块或病变
+            5. 头发密度（正常/稀疏/脱落）
+            6. 整体皮肤纹理（光滑/粗糙/鳞屑）
+            7. 异常斑块或病变
+
+            **显微镜图/特写照检查项**（重点！）：
+            1. **毛囊口细节**：
+               - 开口状态：通畅/轻度角化/明显堵塞/完全闭塞
+               - 毛囊周围：正常/轻微红晕/明显发红/炎症
+               - 皮脂栓塞：无/轻微/明显（白色或黄色）
+
+            2. **角质与皮屑微观特征**：
+               - 白色颗粒状物质（干性皮屑）的数量和大小
+               - 黄色油腻性鳞屑（脂溢性）的分布
+               - 角质层厚度（正常/过度角化/萎缩）
+
+            3. **皮脂腺活动**：
+               - 油光程度（0-10级）
+               - 皮脂质地（清亮/浑浊/蜡质）
+               - 油脂分布模式（均匀/聚集在毛囊口）
+
+            4. **微观炎症标志**：
+               - 局部红点或红斑（数量、大小）
+               - 毛囊周围红晕
+               - 微小脓点或白头
+
+            5. **头皮表面纹理**：
+               - 皮肤光滑度（细腻/粗糙/颗粒感）
+               - 细小裂纹或干燥迹象
+               - 表面光泽（健康光泽/过度油亮/暗淡无光）
 
             **需要诊断的疾病**（至少列出可能存在的风险）：
             - 脂溢性皮炎（头皮油腻、黄色鳞屑）
@@ -410,7 +170,14 @@ class OpenAIService(AIServiceBase):
 
             **返回格式**（必须是有效的JSON）：
             {
+                "image_type": "图像类型（显微镜图/特写照/常规照片）",
                 "scalp_type": "头皮类型（油性/干性/正常/混合/敏感）",
+                "microscopic_findings": {
+                    "follicle_condition": "毛囊状态描述（仅显微镜图需要）",
+                    "keratin_buildup": "角质堆积情况（仅显微镜图需要）",
+                    "sebum_status": "皮脂状态描述（仅显微镜图需要）",
+                    "micro_inflammation": "微观炎症描述（仅显微镜图需要）"
+                },
                 "conditions": [
                     {
                         "name_cn": "疾病中文名",
@@ -424,7 +191,7 @@ class OpenAIService(AIServiceBase):
                 "health_score": 健康评分(0-100，请严格评分),
                 "recommendations": ["具体的治疗或护理建议1", "建议2", "建议3"],
                 "need_doctor": true或false（是否需要就医），
-                "analysis_summary": "综合分析总结，包括主要问题和整体评估"
+                "analysis_summary": "综合分析总结，包括主要问题和整体评估。如果是显微镜图，要明确说明这是显微镜下的观察结果。"
             }
 
             **重要提示**：
@@ -448,23 +215,72 @@ class OpenAIService(AIServiceBase):
             """
         else:
             prompt = """
-            You are an experienced dermatologist specializing in scalp health diagnosis. Please carefully analyze this scalp image and provide a professional medical assessment.
+            You are a senior dermatologist with 20 years of experience specializing in scalp pathology and trichology. Please analyze this scalp image with the highest medical standards.
+
+            **🔬 Image Type Recognition** (IMPORTANT!):
+            This system accepts the following types of scalp images. Please identify the image type first:
+
+            1. **Microscopic/Close-up Images** (10x-200x magnification)
+               - Features: Clear view of follicle openings, sebum, keratin details, micro-scales
+               - Analysis focus: Follicle blockage, keratin buildup, sebum status, micro-inflammation, tiny flakes
+               - This is a **VALID scalp image** - you MUST analyze it in detail!
+
+            2. **Regular Scalp Photos** (normal distance)
+               - Features: Overall scalp area, hairline, hair distribution visible
+               - Analysis focus: Overall tone, large red patches, hair density, obvious scales
+
+            3. **Invalid Images** (non-scalp photos)
+               - Only return error format if the image is completely unrelated to scalp/hair
+                 (like landscapes, objects, other body parts, etc.)
+
+            ⚠️ **KEY REMINDERS**:
+            - Microscopic scalp images/close-ups are **COMPLETELY VALID** scalp images - MUST analyze!
+            - Do NOT reject images just because they are magnified
+            - Microscopic images show more details, which is better for precise diagnosis
 
             **Analysis Requirements** (strictly follow):
-            1. Observe every detail in the image carefully
+            1. Observe every detail carefully (whether microscopic or regular photo)
             2. Do NOT easily judge as "completely normal" - point out any minor issues
             3. Even for healthy scalps, indicate potential risk factors or improvement suggestions
             4. Use professional medical terminology while explaining clearly
+            5. **For microscopic images, pay special attention to micro-features** (follicle openings, keratin particles, sebum texture, etc.)
 
-            **Items to Check**:
-            1. Scalp color (normal/redness/pale/yellow)
-            2. Sebum secretion (excessive/normal/insufficient)
-            3. Dandruff condition (none/mild/moderate/severe)
+            **Items to Check** (focus based on image type):
+
+            **For Regular Photos**:
+            1. Scalp color (normal pink/redness/pale/yellow-brown)
+            2. Overall sebum secretion (excessive/normal/insufficient)
+            3. Visible dandruff (none/mild/moderate/severe)
             4. Inflammation signs (erythema/papules/pustules)
-            5. Follicle status (healthy/clogged/inflamed)
-            6. Hair density (normal/sparse/loss)
-            7. Skin texture (smooth/rough/scaly)
-            8. Abnormal patches or lesions
+            5. Hair density (normal/sparse/loss)
+            6. Overall skin texture (smooth/rough/scaly)
+            7. Abnormal patches or lesions
+
+            **For Microscopic/Close-up Images** (FOCUS!):
+            1. **Follicle Opening Details**:
+               - Opening status: clear/mild keratinization/blocked/completely occluded
+               - Perifollicluar area: normal/mild redness/obvious inflammation
+               - Sebum plugs: none/mild/obvious (white or yellow)
+
+            2. **Keratin & Flake Micro-features**:
+               - White granular material (dry flakes) - quantity and size
+               - Yellow oily scales (seborrheic) - distribution
+               - Stratum corneum thickness (normal/hyperkeratosis/atrophy)
+
+            3. **Sebaceous Gland Activity**:
+               - Oiliness level (0-10 scale)
+               - Sebum texture (clear/turbid/waxy)
+               - Oil distribution pattern (even/concentrated at follicle openings)
+
+            4. **Micro-inflammation Markers**:
+               - Small red dots or patches (count, size)
+               - Perifollicular redness
+               - Tiny pustules or whiteheads
+
+            5. **Scalp Surface Texture**:
+               - Skin smoothness (fine/rough/granular)
+               - Fine cracks or dryness signs
+               - Surface luster (healthy shine/overly oily/dull)
 
             **Conditions to Diagnose** (list at least potential risks):
             - Seborrheic Dermatitis (oily scalp, yellow scales)
@@ -486,7 +302,14 @@ class OpenAIService(AIServiceBase):
 
             **Return Format** (must be valid JSON):
             {
+                "image_type": "image type (Microscopic/Close-up/Regular Photo)",
                 "scalp_type": "scalp type (oily/dry/normal/combination/sensitive)",
+                "microscopic_findings": {
+                    "follicle_condition": "follicle status description (microscopic only)",
+                    "keratin_buildup": "keratin accumulation status (microscopic only)",
+                    "sebum_status": "sebum status description (microscopic only)",
+                    "micro_inflammation": "micro-inflammation description (microscopic only)"
+                },
                 "conditions": [
                     {
                         "name_cn": "Chinese disease name",
@@ -500,14 +323,16 @@ class OpenAIService(AIServiceBase):
                 "health_score": health_score(0-100, strict scoring),
                 "recommendations": ["specific treatment or care recommendation1", "recommendation2", "recommendation3"],
                 "need_doctor": true_or_false (whether medical consultation needed),
-                "analysis_summary": "comprehensive analysis summary, including main issues and overall assessment"
+                "analysis_summary": "comprehensive analysis summary, including main issues and overall assessment. If microscopic image, clearly state these are observations under magnification."
             }
 
             **Important Notes**:
+            - **ACCEPT microscopic/close-up scalp images as valid images**
             - List any abnormalities, even if very minor
             - Don't easily give 90+ scores, be strict in assessment
             - Even for healthy-looking scalps, provide prevention advice
             - Symptom descriptions should be specific, not vague
+            - For microscopic images, describe what you see at micro-level
             """
 
         try:
@@ -530,6 +355,9 @@ class OpenAIService(AIServiceBase):
                     # GPT-4o 及更新的模型需要 max_completion_tokens
                     uses_new_api = model in ["gpt-4o", "gpt-4o-mini"]
 
+                    # 确保prompt是UTF-8编码的字符串
+                    prompt_text = prompt if isinstance(prompt, str) else str(prompt)
+
                     # 构建基础参数
                     api_params = {
                         "model": model,
@@ -550,7 +378,7 @@ class OpenAIService(AIServiceBase):
                                     },
                                     {
                                         "type": "text",
-                                        "text": prompt
+                                        "text": prompt_text
                                     }
                                 ]
                             }
@@ -568,8 +396,7 @@ class OpenAIService(AIServiceBase):
                         api_params["max_tokens"] = 3000
 
                     response = self.client.chat.completions.create(**api_params)
-                    used_model = model  # 记录成功使用的模型
-                    print(f"[INFO] Successfully using model: {model}")  # 日志记录
+                    used_model = model
                     break  # Success, exit loop
 
                 except Exception as e:
@@ -578,7 +405,6 @@ class OpenAIService(AIServiceBase):
 
                     # If model not found, try next model
                     if "model_not_found" in error_msg or "does not exist" in error_msg:
-                        print(f"[WARN] Model {model} not available, trying next...")
                         continue
                     else:
                         # Other errors (like API key error), raise immediately
@@ -656,7 +482,6 @@ class AIServiceManager:
     def get_available_services() -> Dict[str, bool]:
         """Get list of available AI services"""
         return {
-            "Claude (Anthropic)": CLAUDE_AVAILABLE,
             "GPT-4 Vision (OpenAI)": OPENAI_AVAILABLE,
             "Local Analysis (Rule-based)": True
         }
@@ -664,18 +489,11 @@ class AIServiceManager:
     @staticmethod
     def create_service(service_type: str, api_key: str) -> Optional[AIServiceBase]:
         """Create an AI service instance"""
-        if service_type == "Claude (Anthropic)":
-            if not api_key:
-                st.error("Please provide Claude API key")
-                return None
-            return ClaudeService(api_key)
-
-        elif service_type == "GPT-4 Vision (OpenAI)":
+        if service_type == "GPT-4 Vision (OpenAI)":
             if not api_key:
                 st.error("Please provide OpenAI API key")
                 return None
             return OpenAIService(api_key)
-
         else:
             return None
 

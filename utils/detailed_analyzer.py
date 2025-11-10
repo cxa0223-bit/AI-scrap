@@ -132,24 +132,38 @@ class DetailedScalpAnalyzer:
 
     @staticmethod
     def _detect_red_dots(img_array: np.ndarray, img_hsv: np.ndarray) -> List[Dict]:
-        """检测红点/红斑"""
+        """检测红点/红斑 - 增强版"""
         red_dots = []
 
-        # 在HSV中检测红色区域
-        # 红色在HSV中的范围
-        lower_red1 = np.array([0, 120, 70])
-        upper_red1 = np.array([10, 255, 255])
-        lower_red2 = np.array([170, 120, 70])
+        # 方法1: 在HSV中检测红色区域（提高灵敏度）
+        # 扩大红色检测范围，捕捉轻微红斑
+        lower_red1 = np.array([0, 80, 50])      # 降低饱和度和亮度阈值
+        upper_red1 = np.array([15, 255, 255])   # 扩大色调范围
+        lower_red2 = np.array([165, 80, 50])
         upper_red2 = np.array([180, 255, 255])
 
         mask1 = cv2.inRange(img_hsv, lower_red1, upper_red1)
         mask2 = cv2.inRange(img_hsv, lower_red2, upper_red2)
-        red_mask = mask1 + mask2
+        hsv_red_mask = mask1 + mask2
 
-        # 形态学操作去除噪声
-        kernel = np.ones((3, 3), np.uint8)
-        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel)
-        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
+        # 方法2: 在RGB空间检测红色（补充检测）
+        # 红色通道明显高于绿色和蓝色通道
+        r_channel = img_array[:, :, 0].astype(float)
+        g_channel = img_array[:, :, 1].astype(float)
+        b_channel = img_array[:, :, 2].astype(float)
+
+        # 红色优势检测
+        red_dominance = (r_channel - g_channel) + (r_channel - b_channel)
+        rgb_red_mask = ((red_dominance > 30) & (r_channel > 120)).astype(np.uint8) * 255
+
+        # 合并两种检测方法
+        red_mask = cv2.bitwise_or(hsv_red_mask, rgb_red_mask)
+
+        # 形态学操作去除噪声（更精细）
+        kernel_small = np.ones((2, 2), np.uint8)
+        kernel_large = np.ones((3, 3), np.uint8)
+        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel_small)
+        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel_large)
 
         # 查找轮廓
         contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -177,30 +191,57 @@ class DetailedScalpAnalyzer:
 
     @staticmethod
     def _detect_white_flakes(img_array: np.ndarray, img_hsv: np.ndarray) -> List[Dict]:
-        """检测白色鳞屑/头皮屑"""
+        """检测白色鳞屑/头皮屑 - 增强版"""
         white_flakes = []
 
-        # 检测白色/灰白色区域
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        # 转换到LAB色彩空间（对白色检测更准确）
+        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+        l_channel, a_channel, b_channel = cv2.split(lab)
 
-        # 高亮度低饱和度区域
+        # 提取HSV通道
         saturation = img_hsv[:, :, 1]
         value = img_hsv[:, :, 2]
 
-        # 白色鳞屑特征：高亮度、低饱和度
-        white_mask = np.logical_and(value > 200, saturation < 30)
-        white_mask = white_mask.astype(np.uint8) * 255
+        # 方法1: 高亮度低饱和度检测（纯白色鳞屑）
+        pure_white_mask = np.logical_and(
+            np.logical_and(value > 200, saturation < 30),
+            l_channel > 180  # LAB的L通道高值
+        ).astype(np.uint8) * 255
 
-        # 形态学操作
+        # 方法2: 银白色鳞屑检测（中高亮度，极低饱和度）
+        silver_white_mask = np.logical_and(
+            np.logical_and(value > 180, saturation < 40),
+            np.logical_and(l_channel > 160, l_channel <= 200)
+        ).astype(np.uint8) * 255
+
+        # 方法3: 黄色油腻性鳞屑检测（脂溢性皮炎特征）
+        # 黄色：低饱和度，中等亮度，b通道偏正（黄色）
+        yellow_flakes_mask = np.logical_and(
+            np.logical_and(value > 140, value < 220),
+            np.logical_and(saturation > 20, saturation < 80)
+        )
+        yellow_flakes_mask = np.logical_and(yellow_flakes_mask, b_channel > 130).astype(np.uint8) * 255
+
+        # 合并所有鳞屑类型
+        white_mask = cv2.bitwise_or(pure_white_mask, silver_white_mask)
+        white_mask = cv2.bitwise_or(white_mask, yellow_flakes_mask)
+
+        # 使用边缘检测增强鳞屑轮廓
+        edges = cv2.Canny(img_array, 50, 150)
+        white_mask = cv2.bitwise_and(white_mask, cv2.dilate(edges, np.ones((2, 2), np.uint8)))
+
+        # 形态学操作（更精细）
+        kernel_small = np.ones((2, 2), np.uint8)
         kernel = np.ones((3, 3), np.uint8)
-        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel)
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel_small)
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel)
 
         # 查找轮廓
         contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 10:
+            if area > 8:  # 降低阈值，检测更小的鳞屑
                 M = cv2.moments(contour)
                 if M["m00"] != 0:
                     cx = int(M["m10"] / M["m00"])
@@ -210,10 +251,35 @@ class DetailedScalpAnalyzer:
                     perimeter = cv2.arcLength(contour, True)
                     circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
 
+                    # 分析鳞屑颜色类型
+                    mask = np.zeros(img_array.shape[:2], np.uint8)
+                    cv2.drawContours(mask, [contour], -1, 255, -1)
+
+                    # 计算该区域的平均颜色
+                    mean_color = cv2.mean(img_array, mask=mask)[:3]
+                    mean_sat = cv2.mean(img_hsv[:, :, 1], mask=mask)[0]
+                    mean_b = cv2.mean(b_channel, mask=mask)[0]
+
+                    # 判断鳞屑类型
+                    if mean_sat < 30 and mean_color[0] > 200:
+                        flake_color = '纯白色'
+                        flake_nature = '干性'
+                    elif mean_sat < 40 and mean_color[0] > 180:
+                        flake_color = '银白色'
+                        flake_nature = '干性'
+                    elif mean_b > 130 and mean_sat > 20:
+                        flake_color = '黄色'
+                        flake_nature = '油性'
+                    else:
+                        flake_color = '灰白色'
+                        flake_nature = '混合'
+
                     white_flakes.append({
                         'position': (cx, cy),
                         'area': area,
-                        'type': '大片鳞屑' if area > 200 else '小片鳞屑' if area > 50 else '细小皮屑',
+                        'type': '大片鳞屑' if area > 200 else '中等鳞屑' if area > 50 else '小片鳞屑' if area > 20 else '细小皮屑',
+                        'color': flake_color,
+                        'nature': flake_nature,
                         'shape': 'circular' if circularity > 0.7 else 'irregular',
                         'severity': 'severe' if area > 200 else 'moderate' if area > 50 else 'mild'
                     })

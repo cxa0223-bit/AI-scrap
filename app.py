@@ -15,6 +15,7 @@ from ai_analyzer import analyze_scalp_image, get_care_recommendations
 from recommender import load_products, recommend_products, format_product_card, save_recommendation_history
 from database import init_database, AnalysisHistoryDB, RecommendationDB, setup_database
 from ai_services import AIServiceManager
+from image_annotator import ScalpImageAnnotator
 import uuid
 from datetime import datetime
 
@@ -358,27 +359,82 @@ with tab1:
                 st.session_state['previous_file'] = None
                 st.rerun()
 
-        uploaded_file = st.file_uploader(
-            "Choose your scalp image | 选择头皮照片",
-            type=['jpg', 'jpeg', 'png'],
-            help="Supports JPG, PNG formats | 支持JPG、PNG格式",
-            key="file_uploader"
+        # 多图上传模式选择
+        upload_mode = st.radio(
+            "Upload Mode | 上传模式",
+            options=["Single Image | 单张图片", "Multiple Images (up to 4) | 多张图片(最多4张)"],
+            horizontal=True,
+            help="单张模式：上传一张头皮照片 | 多张模式：上传最多4张不同角度的头皮照片进行综合分析"
         )
 
-        # 检测是否上传了新图片
-        if uploaded_file:
-            # 获取当前文件的标识信息
-            current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+        is_multi_mode = "Multiple" in upload_mode
 
-            # 如果是新图片，清除之前的分析结果
-            if 'previous_file' not in st.session_state or st.session_state['previous_file'] != current_file_id:
-                st.session_state['analyzed'] = False
-                st.session_state['result'] = None
-                st.session_state['previous_file'] = current_file_id
+        if is_multi_mode:
+            uploaded_files = st.file_uploader(
+                "Choose your scalp images (up to 4) | 选择头皮照片 (最多4张)",
+                type=['jpg', 'jpeg', 'png'],
+                accept_multiple_files=True,
+                help="Upload up to 4 images from different angles | 上传最多4张不同角度的照片",
+                key="file_uploader_multi"
+            )
 
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image | 上传的照片", use_container_width=True)
+            # 限制最多4张
+            if uploaded_files and len(uploaded_files) > 4:
+                st.warning("⚠️ Maximum 4 images allowed. Only the first 4 will be used. | 最多允许4张图片，将只使用前4张。")
+                uploaded_files = uploaded_files[:4]
 
+            # 检测是否上传了新图片
+            if uploaded_files:
+                # 生成文件ID列表
+                current_file_ids = [f"{f.name}_{f.size}" for f in uploaded_files]
+                current_file_id = "_".join(current_file_ids)
+
+                # 如果是新图片，清除之前的分析结果
+                if 'previous_file' not in st.session_state or st.session_state['previous_file'] != current_file_id:
+                    st.session_state['analyzed'] = False
+                    st.session_state['result'] = None
+                    st.session_state['previous_file'] = current_file_id
+
+                # 显示所有上传的图片
+                st.markdown(f"### 📸 Uploaded Images ({len(uploaded_files)}) | 已上传图片 ({len(uploaded_files)})")
+                cols = st.columns(min(len(uploaded_files), 2))
+                images = []
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    img = Image.open(uploaded_file)
+                    images.append(img)
+                    with cols[idx % 2]:
+                        st.image(img, caption=f"Image {idx+1}: {uploaded_file.name}", use_container_width=True)
+
+                # 保存到session state
+                st.session_state['uploaded_images'] = images
+                st.session_state['uploaded_filenames'] = [f.name for f in uploaded_files]
+                image = images[0]  # 主图像用于后续处理
+        else:
+            uploaded_file = st.file_uploader(
+                "Choose your scalp image | 选择头皮照片",
+                type=['jpg', 'jpeg', 'png'],
+                help="Supports JPG, PNG formats | 支持JPG、PNG格式",
+                key="file_uploader_single"
+            )
+
+            # 检测是否上传了新图片
+            if uploaded_file:
+                # 获取当前文件的标识信息
+                current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+
+                # 如果是新图片，清除之前的分析结果
+                if 'previous_file' not in st.session_state or st.session_state['previous_file'] != current_file_id:
+                    st.session_state['analyzed'] = False
+                    st.session_state['result'] = None
+                    st.session_state['previous_file'] = current_file_id
+
+                image = Image.open(uploaded_file)
+                st.session_state['uploaded_images'] = [image]
+                st.session_state['uploaded_filenames'] = [uploaded_file.name]
+                st.image(image, caption="Uploaded Image | 上传的照片", use_container_width=True)
+
+        # 添加AI配置选项 - 移到外层，适用于所有上传模式
+        if uploaded_files if is_multi_mode else uploaded_file:
             # 添加AI配置选项
             st.markdown("---")
             st.markdown("### 🤖 AI分析选项 | AI Analysis Options")
@@ -701,6 +757,23 @@ with tab1:
                     except Exception as e:
                         st.warning(f"保存分析历史失败: {e}")
 
+                    # 生成标注图像（如果有本地分析结果）
+                    annotated_images = []
+                    if 'uploaded_images' in st.session_state:
+                        annotator = ScalpImageAnnotator()
+                        for img in st.session_state['uploaded_images']:
+                            # 执行本地分析以获取检测结果
+                            local_analysis = analyze_scalp_image(img)
+                            # 标注图像
+                            annotated_img = annotator.annotate_analysis_results(
+                                img,
+                                local_analysis,
+                                show_labels=True,
+                                show_legend=True
+                            )
+                            annotated_images.append(annotated_img)
+                        st.session_state['annotated_images'] = annotated_images
+
                     # 保存到session state
                     st.session_state['analyzed'] = True
                     st.session_state['result'] = result
@@ -714,6 +787,38 @@ with tab1:
             
             # 显示分析结果
             st.success("✅ Analysis Complete! | 分析完成！")
+
+            # 显示标注图像（如果有）
+            if 'annotated_images' in st.session_state and st.session_state['annotated_images']:
+                st.markdown("---")
+                st.markdown("### 🎯 问题标注图 | Annotated Images with Detected Issues")
+                st.info("📍 图中标注了检测到的问题区域：🔴 红点表示炎症/红斑，🟦 方框表示鳞屑/头皮屑，🟢 圆圈表示毛囊")
+
+                annotated_imgs = st.session_state['annotated_images']
+                uploaded_filenames = st.session_state.get('uploaded_filenames', [f"Image {i+1}" for i in range(len(annotated_imgs))])
+
+                # 如果是多张图片，显示对比
+                if len(annotated_imgs) > 1:
+                    # 创建tabs显示每张标注图
+                    tabs = st.tabs([f"📷 {name}" for name in uploaded_filenames])
+                    for idx, (tab, annotated_img, filename) in enumerate(zip(tabs, annotated_imgs, uploaded_filenames)):
+                        with tab:
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.markdown("**原始图像**")
+                                st.image(st.session_state['uploaded_images'][idx], use_container_width=True)
+                            with col_b:
+                                st.markdown("**标注图像**")
+                                st.image(annotated_img, use_container_width=True)
+                else:
+                    # 单张图片，并排显示
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.markdown("**原始图像 | Original Image**")
+                        st.image(st.session_state['uploaded_images'][0], use_container_width=True)
+                    with col_b:
+                        st.markdown("**标注图像 | Annotated Image**")
+                        st.image(annotated_imgs[0], use_container_width=True)
 
             # 显示调试信息（在最顶部，不会被刷新隐藏）
             if result.get('debug_mode', False) and 'debug_ai_result' in st.session_state:

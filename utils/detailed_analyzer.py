@@ -180,7 +180,8 @@ class DetailedScalpAnalyzer:
                     radius = int(np.sqrt(area / np.pi))
 
                     red_dots.append({
-                        'position': (cx, cy),
+                        'center': (cx, cy),  # 修改：使用'center'而不是'position'以匹配标注器
+                        'position': (cx, cy),  # 保留兼容性
                         'size': radius,
                         'area': area,
                         'intensity': 'high' if area > 50 else 'moderate' if area > 20 else 'low',
@@ -275,7 +276,8 @@ class DetailedScalpAnalyzer:
                         flake_nature = '混合'
 
                     white_flakes.append({
-                        'position': (cx, cy),
+                        'center': (cx, cy),  # 修改：使用'center'而不是'position'以匹配标注器
+                        'position': (cx, cy),  # 保留兼容性
                         'area': area,
                         'type': '大片鳞屑' if area > 200 else '中等鳞屑' if area > 50 else '小片鳞屑' if area > 20 else '细小皮屑',
                         'color': flake_color,

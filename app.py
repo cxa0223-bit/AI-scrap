@@ -759,6 +759,10 @@ with tab1:
 
                     # 生成标注图像（总是执行以显示检测结果）
                     annotated_images = []
+                    total_red_dots = 0
+                    total_flakes = 0
+                    total_follicles = 0
+
                     if 'uploaded_images' in st.session_state:
                         annotator = ScalpImageAnnotator()
                         for idx, img in enumerate(st.session_state['uploaded_images']):
@@ -773,6 +777,11 @@ with tab1:
                                 if 'follicle_info' in local_analysis:
                                     follicle_count = len(local_analysis['follicle_info'].get('detected_follicles', []))
 
+                                # 累计统计
+                                total_red_dots += red_count
+                                total_flakes += flake_count
+                                total_follicles += follicle_count
+
                                 print(f"[DEBUG] Image {idx+1} - Detected: {red_count} red dots, {flake_count} flakes, {follicle_count} follicles")
 
                                 # 标注图像
@@ -785,11 +794,19 @@ with tab1:
                                 annotated_images.append(annotated_img)
                             except Exception as e:
                                 print(f"[ERROR] Failed to annotate image {idx+1}: {e}")
+                                import traceback
+                                traceback.print_exc()
                                 # 如果标注失败，使用原图
                                 annotated_images.append(img)
 
                         st.session_state['annotated_images'] = annotated_images
+                        st.session_state['detection_stats'] = {
+                            'red_dots': total_red_dots,
+                            'flakes': total_flakes,
+                            'follicles': total_follicles
+                        }
                         print(f"[DEBUG] Total annotated images: {len(annotated_images)}")
+                        print(f"[DEBUG] Total detections: {total_red_dots} red dots, {total_flakes} flakes, {total_follicles} follicles")
 
                     # 保存到session state
                     st.session_state['analyzed'] = True
@@ -809,6 +826,21 @@ with tab1:
             if 'annotated_images' in st.session_state and st.session_state['annotated_images']:
                 st.markdown("---")
                 st.markdown("### 🎯 问题标注图 | Annotated Images with Detected Issues")
+
+                # 显示检测统计信息
+                if 'detection_stats' in st.session_state:
+                    stats = st.session_state['detection_stats']
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("🔴 红点检测", f"{stats.get('red_dots', 0)} 个")
+                    with col_stat2:
+                        st.metric("🟡 鳞屑检测", f"{stats.get('flakes', 0)} 个")
+                    with col_stat3:
+                        st.metric("🟢 毛囊检测", f"{stats.get('follicles', 0)} 个")
+
+                    if stats.get('red_dots', 0) == 0 and stats.get('flakes', 0) == 0:
+                        st.warning("⚠️ 未检测到明显问题。这可能意味着：1) 头皮状况良好 2) 图像质量/角度不适合检测 3) 检测阈值需要调整")
+
                 st.info("📍 图中标注了检测到的问题区域：🔴 红色圆圈=炎症/红斑，🟡 黄色方框=鳞屑/头皮屑，🟢 绿色圆圈=毛囊")
 
                 annotated_imgs = st.session_state['annotated_images']

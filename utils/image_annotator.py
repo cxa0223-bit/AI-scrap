@@ -14,14 +14,15 @@ import os
 class ScalpImageAnnotator:
     """头皮图像标注器 - 标注检测到的问题"""
 
-    # 颜色定义 (BGR格式用于OpenCV)
+    # 颜色定义 (BGR格式用于OpenCV) - 使用高对比度鲜艳颜色
     COLORS = {
-        'red_dots': (0, 0, 255),        # 红色 - 红点/炎症
-        'white_flakes': (255, 255, 0),  # 青色 - 白色鳞屑
-        'follicles': (0, 255, 0),       # 绿色 - 毛囊
-        'oil': (0, 165, 255),           # 橙色 - 油脂区域
+        'red_dots': (0, 0, 255),        # 纯红色 - 红点/炎症
+        'white_flakes': (0, 255, 255),  # 纯黄色 - 白色鳞屑（更鲜艳）
+        'follicles': (0, 255, 0),       # 纯绿色 - 毛囊
+        'oil': (0, 128, 255),           # 橙色 - 油脂区域
         'text': (255, 255, 255),        # 白色 - 文字
-        'background': (0, 0, 0)         # 黑色 - 文字背景
+        'background': (0, 0, 0),        # 黑色 - 文字背景
+        'highlight': (255, 0, 255)      # 品红色 - 高亮标记
     }
 
     def __init__(self):
@@ -99,24 +100,37 @@ class ScalpImageAnnotator:
         red_dots: List[Dict],
         show_labels: bool
     ) -> np.ndarray:
-        """标注红点/红斑"""
+        """标注红点/红斑 - 增强版"""
+        # 创建半透明overlay层
+        overlay = img.copy()
+
         for i, dot in enumerate(red_dots):
             x, y = dot['center']
             area = dot.get('area', 0)
 
-            # 根据面积决定圆圈大小
-            radius = max(15, int(np.sqrt(area / np.pi)) + 5)
+            # 根据面积决定圆圈大小（增大显示）
+            radius = max(20, int(np.sqrt(area / np.pi)) + 10)
 
-            # 绘制圆圈
-            cv2.circle(img, (x, y), radius, self.COLORS['red_dots'], 2)
+            # 绘制半透明填充圆
+            cv2.circle(overlay, (x, y), radius, self.COLORS['red_dots'], -1)
 
-            # 绘制中心点
-            cv2.circle(img, (x, y), 3, self.COLORS['red_dots'], -1)
+            # 绘制粗边框圆圈（更粗更明显）
+            cv2.circle(img, (x, y), radius, self.COLORS['red_dots'], 4)
 
-            # 添加标签
-            if show_labels and i < 10:  # 只标注前10个，避免过于拥挤
+            # 绘制内圈增强对比
+            cv2.circle(img, (x, y), radius - 3, self.COLORS['red_dots'], 2)
+
+            # 绘制中心点（更大）
+            cv2.circle(img, (x, y), 5, (255, 255, 255), -1)  # 白色中心点
+            cv2.circle(img, (x, y), 4, self.COLORS['red_dots'], -1)
+
+            # 添加标签（更大字体）
+            if show_labels and i < 15:  # 增加标注数量
                 label = f"R{i+1}"
-                self._draw_label(img, label, (x, y - radius - 5), self.COLORS['red_dots'])
+                self._draw_label(img, label, (x, y - radius - 10), self.COLORS['red_dots'], font_scale=0.6)
+
+        # 混合overlay层（半透明效果）
+        cv2.addWeighted(overlay, 0.3, img, 0.7, 0, img)
 
         return img
 
@@ -126,26 +140,47 @@ class ScalpImageAnnotator:
         white_flakes: List[Dict],
         show_labels: bool
     ) -> np.ndarray:
-        """标注白色鳞屑"""
+        """标注白色鳞屑 - 增强版"""
+        # 创建半透明overlay层
+        overlay = img.copy()
+
         for i, flake in enumerate(white_flakes):
             x, y = flake['center']
             area = flake.get('area', 0)
 
-            # 根据面积决定方框大小
-            size = max(12, int(np.sqrt(area)) + 4)
+            # 根据面积决定方框大小（增大显示）
+            size = max(18, int(np.sqrt(area)) + 8)
 
-            # 绘制矩形框
+            # 绘制矩形框坐标
             pt1 = (x - size, y - size)
             pt2 = (x + size, y + size)
-            cv2.rectangle(img, pt1, pt2, self.COLORS['white_flakes'], 2)
 
-            # 添加标签
-            if show_labels and i < 10:  # 只标注前10个
+            # 绘制半透明填充矩形
+            cv2.rectangle(overlay, pt1, pt2, self.COLORS['white_flakes'], -1)
+
+            # 绘制粗边框矩形（更粗更明显）
+            cv2.rectangle(img, pt1, pt2, self.COLORS['white_flakes'], 4)
+
+            # 绘制内框增强对比
+            cv2.rectangle(img,
+                         (x - size + 3, y - size + 3),
+                         (x + size - 3, y + size - 3),
+                         self.COLORS['white_flakes'], 2)
+
+            # 绘制中心十字标记（更明显）
+            cv2.line(img, (x - 8, y), (x + 8, y), self.COLORS['white_flakes'], 3)
+            cv2.line(img, (x, y - 8), (x, y + 8), self.COLORS['white_flakes'], 3)
+
+            # 添加标签（更大字体）
+            if show_labels and i < 15:  # 增加标注数量
                 label = f"F{i+1}"
                 flake_type = flake.get('type', '')
                 if flake_type:
                     label += f"({flake_type[:1]})"  # 添加类型首字母
-                self._draw_label(img, label, (x, y - size - 5), self.COLORS['white_flakes'])
+                self._draw_label(img, label, (x, y - size - 10), self.COLORS['white_flakes'], font_scale=0.6)
+
+        # 混合overlay层（半透明效果）
+        cv2.addWeighted(overlay, 0.25, img, 0.75, 0, img)
 
         return img
 
@@ -173,23 +208,32 @@ class ScalpImageAnnotator:
         img: np.ndarray,
         text: str,
         position: Tuple[int, int],
-        color: Tuple[int, int, int]
+        color: Tuple[int, int, int],
+        font_scale: float = 0.6
     ):
-        """绘制文字标签"""
+        """绘制文字标签 - 增强版"""
         x, y = position
 
-        # 设置字体
+        # 设置字体（更大更粗）
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.4
-        thickness = 1
+        thickness = 2  # 增加字体粗细
 
         # 获取文字大小
         (text_width, text_height), baseline = cv2.getTextSize(
             text, font, font_scale, thickness
         )
 
-        # 绘制背景矩形
-        padding = 2
+        # 绘制带白边的背景矩形（更明显）
+        padding = 4
+        # 外层白边
+        cv2.rectangle(
+            img,
+            (x - padding - 2, y - text_height - padding - 2),
+            (x + text_width + padding + 2, y + baseline + padding + 2),
+            (255, 255, 255),
+            -1
+        )
+        # 内层黑色背景
         cv2.rectangle(
             img,
             (x - padding, y - text_height - padding),
@@ -230,50 +274,63 @@ class ScalpImageAnnotator:
         if 'follicle_info' in results:
             follicle_count = len(results['follicle_info'].get('detected_follicles', []))
 
-        # 绘制半透明背景
+        # 绘制半透明背景（更大更明显）
         overlay = img.copy()
-        legend_height = 20 + (red_count > 0) * 25 + (flake_count > 0) * 25 + (follicle_count > 0) * 25 + 10
+        legend_height = 30 + (red_count > 0) * 35 + (flake_count > 0) * 35 + (follicle_count > 0) * 35 + 15
+
+        # 外层白边
         cv2.rectangle(
             overlay,
-            (legend_x - 10, legend_y - 10),
-            (legend_x + legend_width, legend_y + legend_height),
+            (legend_x - 15, legend_y - 15),
+            (legend_x + legend_width + 5, legend_y + legend_height),
+            (255, 255, 255),
+            -1
+        )
+        # 内层黑色背景
+        cv2.rectangle(
+            overlay,
+            (legend_x - 12, legend_y - 12),
+            (legend_x + legend_width + 2, legend_y + legend_height - 3),
             (0, 0, 0),
             -1
         )
-        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+        cv2.addWeighted(overlay, 0.8, img, 0.2, 0, img)
 
-        # 绘制图例项
+        # 绘制图例项（更大更明显）
         y_offset = legend_y
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.45
-        thickness = 1
+        font_scale = 0.6  # 增大字体
+        thickness = 2     # 增加粗细
 
         if red_count > 0:
-            cv2.circle(img, (legend_x, y_offset + 5), 5, self.COLORS['red_dots'], -1)
+            # 绘制更大的圆形标记
+            cv2.circle(img, (legend_x, y_offset + 8), 8, self.COLORS['red_dots'], -1)
+            cv2.circle(img, (legend_x, y_offset + 8), 8, self.COLORS['red_dots'], 2)
             cv2.putText(
                 img,
                 f"Red Dots: {red_count}",
-                (legend_x + 15, y_offset + 10),
+                (legend_x + 20, y_offset + 15),
                 font,
                 font_scale,
                 self.COLORS['text'],
                 thickness,
                 cv2.LINE_AA
             )
-            y_offset += 25
+            y_offset += 35
 
         if flake_count > 0:
+            # 绘制更大的矩形标记
             cv2.rectangle(
                 img,
-                (legend_x - 5, y_offset),
-                (legend_x + 5, y_offset + 10),
+                (legend_x - 8, y_offset),
+                (legend_x + 8, y_offset + 16),
                 self.COLORS['white_flakes'],
-                1
+                3
             )
             cv2.putText(
                 img,
                 f"Flakes: {flake_count}",
-                (legend_x + 15, y_offset + 10),
+                (legend_x + 20, y_offset + 15),
                 font,
                 font_scale,
                 self.COLORS['text'],

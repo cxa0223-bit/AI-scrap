@@ -757,22 +757,39 @@ with tab1:
                     except Exception as e:
                         st.warning(f"保存分析历史失败: {e}")
 
-                    # 生成标注图像（如果有本地分析结果）
+                    # 生成标注图像（总是执行以显示检测结果）
                     annotated_images = []
                     if 'uploaded_images' in st.session_state:
                         annotator = ScalpImageAnnotator()
-                        for img in st.session_state['uploaded_images']:
-                            # 执行本地分析以获取检测结果
-                            local_analysis = analyze_scalp_image(img)
-                            # 标注图像
-                            annotated_img = annotator.annotate_analysis_results(
-                                img,
-                                local_analysis,
-                                show_labels=True,
-                                show_legend=True
-                            )
-                            annotated_images.append(annotated_img)
+                        for idx, img in enumerate(st.session_state['uploaded_images']):
+                            try:
+                                # 执行本地分析以获取检测结果
+                                local_analysis = analyze_scalp_image(img)
+
+                                # 调试：记录检测到的问题数量
+                                red_count = len(local_analysis.get('red_dots', []))
+                                flake_count = len(local_analysis.get('white_flakes', []))
+                                follicle_count = 0
+                                if 'follicle_info' in local_analysis:
+                                    follicle_count = len(local_analysis['follicle_info'].get('detected_follicles', []))
+
+                                print(f"[DEBUG] Image {idx+1} - Detected: {red_count} red dots, {flake_count} flakes, {follicle_count} follicles")
+
+                                # 标注图像
+                                annotated_img = annotator.annotate_analysis_results(
+                                    img,
+                                    local_analysis,
+                                    show_labels=True,
+                                    show_legend=True
+                                )
+                                annotated_images.append(annotated_img)
+                            except Exception as e:
+                                print(f"[ERROR] Failed to annotate image {idx+1}: {e}")
+                                # 如果标注失败，使用原图
+                                annotated_images.append(img)
+
                         st.session_state['annotated_images'] = annotated_images
+                        print(f"[DEBUG] Total annotated images: {len(annotated_images)}")
 
                     # 保存到session state
                     st.session_state['analyzed'] = True
@@ -792,7 +809,7 @@ with tab1:
             if 'annotated_images' in st.session_state and st.session_state['annotated_images']:
                 st.markdown("---")
                 st.markdown("### 🎯 问题标注图 | Annotated Images with Detected Issues")
-                st.info("📍 图中标注了检测到的问题区域：🔴 红点表示炎症/红斑，🟦 方框表示鳞屑/头皮屑，🟢 圆圈表示毛囊")
+                st.info("📍 图中标注了检测到的问题区域：🔴 红色圆圈=炎症/红斑，🟡 黄色方框=鳞屑/头皮屑，🟢 绿色圆圈=毛囊")
 
                 annotated_imgs = st.session_state['annotated_images']
                 uploaded_filenames = st.session_state.get('uploaded_filenames', [f"Image {i+1}" for i in range(len(annotated_imgs))])

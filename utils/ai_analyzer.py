@@ -9,10 +9,15 @@ from PIL import Image
 from scipy import ndimage
 
 try:
+    # Try relative import first (for package imports)
     from .detailed_analyzer import DetailedScalpAnalyzer
 except ImportError:
-    # 如果详细分析器不可用，设置为None
-    DetailedScalpAnalyzer = None
+    try:
+        # Try absolute import (for direct imports)
+        from detailed_analyzer import DetailedScalpAnalyzer
+    except ImportError:
+        # 如果详细分析器不可用，设置为None
+        DetailedScalpAnalyzer = None
 
 def is_scalp_image(img_array, img_hsv):
     """
@@ -63,7 +68,7 @@ def is_scalp_image(img_array, img_hsv):
     if edge_density > 5 and skin_percentage > 10:
         confidence += 20
 
-    if confidence >= 60:
+    if confidence >= 30:  # 降低阈值以支持显微镜照片 (60->30)
         is_scalp = True
 
     return is_scalp, confidence
@@ -161,9 +166,14 @@ def analyze_scalp_image(image):
     if DetailedScalpAnalyzer:
         try:
             detailed_analysis = DetailedScalpAnalyzer.analyze_scalp_condition_detailed(img_array)
+            print(f"[SUCCESS] DetailedScalpAnalyzer completed successfully")
         except Exception as e:
-            print(f"详细分析失败: {e}")
+            print(f"[ERROR] 详细分析失败: {e}")
+            import traceback
+            traceback.print_exc()
             detailed_analysis = None
+    else:
+        print("[WARNING] DetailedScalpAnalyzer is not available")
 
     result = {
         'scalp_type': scalp_type,
@@ -178,6 +188,43 @@ def analyze_scalp_image(image):
     # 添加详细分析结果
     if detailed_analysis:
         result['detailed_analysis'] = detailed_analysis
+        # 将检测结果提升到顶层，以便标注功能可以访问
+        # 检测结果在 detailed_analysis['micro_symptoms'] 中
+        if 'micro_symptoms' in detailed_analysis:
+            micro_symptoms = detailed_analysis['micro_symptoms']
+            if 'red_dots' in micro_symptoms:
+                result['red_dots'] = micro_symptoms['red_dots']
+                print(f"[FIX APPLIED v3] Extracted {len(micro_symptoms['red_dots'])} red dots to top level")
+            if 'white_flakes' in micro_symptoms:
+                result['white_flakes'] = micro_symptoms['white_flakes']
+                print(f"[FIX APPLIED v3] Extracted {len(micro_symptoms['white_flakes'])} white flakes to top level")
+            if 'follicle_info' in micro_symptoms:
+                result['follicle_info'] = micro_symptoms['follicle_info']
+        else:
+            print("[FIX APPLIED v3] WARNING: No micro_symptoms found in detailed_analysis")
+    else:
+        # FALLBACK: 如果detailed_analysis失败，直接调用检测函数
+        print("[FALLBACK] detailed_analysis is None, calling detection functions directly")
+        try:
+            # 直接调用检测函数
+            img_hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+
+            red_dots = DetailedScalpAnalyzer._detect_red_dots(img_array, img_hsv)
+            white_flakes = DetailedScalpAnalyzer._detect_white_flakes(img_array, img_hsv)
+            follicle_info = DetailedScalpAnalyzer._detect_follicle_density(img_array)
+
+            result['red_dots'] = red_dots
+            result['white_flakes'] = white_flakes
+            result['follicle_info'] = follicle_info
+
+            print(f"[FALLBACK SUCCESS] Detected {len(red_dots)} red dots, {len(white_flakes)} flakes")
+        except Exception as e:
+            print(f"[FALLBACK FAILED] {e}")
+            import traceback
+            traceback.print_exc()
+            result['red_dots'] = []
+            result['white_flakes'] = []
+            result['follicle_info'] = {'detected_follicles': []}
 
     return result
 

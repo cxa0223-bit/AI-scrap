@@ -135,42 +135,49 @@ class DetailedScalpAnalyzer:
         """检测红点/红斑 - 增强版"""
         red_dots = []
 
-        # 方法1: 在HSV中检测红色区域（提高灵敏度）
-        # 扩大红色检测范围，捕捉轻微红斑
-        lower_red1 = np.array([0, 80, 50])      # 降低饱和度和亮度阈值
-        upper_red1 = np.array([15, 255, 255])   # 扩大色调范围
-        lower_red2 = np.array([165, 80, 50])
-        upper_red2 = np.array([180, 255, 255])
+        # 方法1: 在HSV中检测红色区域（显微镜模式 - 检测粉红色调）
+        # 显微镜照片中红色区域通常呈现粉红色（高亮度，低饱和度）
+        lower_red1 = np.array([0, 5, 150])      # 显微镜模式: 极低饱和，高亮度粉红色
+        upper_red1 = np.array([15, 80, 255])    # 扩大色调和饱和度范围
+        lower_red2 = np.array([160, 5, 150])    # 显微镜模式: 粉红色调
+        upper_red2 = np.array([180, 80, 255])
 
         mask1 = cv2.inRange(img_hsv, lower_red1, upper_red1)
         mask2 = cv2.inRange(img_hsv, lower_red2, upper_red2)
         hsv_red_mask = mask1 + mask2
 
-        # 方法2: 在RGB空间检测红色（补充检测）
-        # 红色通道明显高于绿色和蓝色通道
+        # 方法2: 在RGB空间检测红色（显微镜模式 - 检测高亮粉红区）
+        # 红色通道略高于其他通道，且整体亮度高
         r_channel = img_array[:, :, 0].astype(float)
         g_channel = img_array[:, :, 1].astype(float)
         b_channel = img_array[:, :, 2].astype(float)
 
-        # 红色优势检测
+        # 粉红色检测（显微镜模式：轻微红色优势 + 高亮度）
         red_dominance = (r_channel - g_channel) + (r_channel - b_channel)
-        rgb_red_mask = ((red_dominance > 30) & (r_channel > 120)).astype(np.uint8) * 255
+        brightness = (r_channel + g_channel + b_channel) / 3
+        rgb_red_mask = ((red_dominance > 3) & (r_channel > 150) & (brightness > 140)).astype(np.uint8) * 255  # 显微镜模式
 
         # 合并两种检测方法
         red_mask = cv2.bitwise_or(hsv_red_mask, rgb_red_mask)
 
-        # 形态学操作去除噪声（更精细）
-        kernel_small = np.ones((2, 2), np.uint8)
-        kernel_large = np.ones((3, 3), np.uint8)
+        # 形态学操作去除噪声（最小化处理以保留更多特征）
+        kernel_small = np.ones((1, 1), np.uint8)  # 减小 (2,2)->(1,1)
+        kernel_large = np.ones((2, 2), np.uint8)  # 减小 (3,3)->(2,2)
         red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel_small)
         red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel_large)
 
+        # 调试输出
+        print(f"[DEBUG RED] HSV mask pixels: {np.sum(hsv_red_mask > 0)}")
+        print(f"[DEBUG RED] RGB mask pixels: {np.sum(rgb_red_mask > 0)}")
+        print(f"[DEBUG RED] Combined mask pixels: {np.sum(red_mask > 0)}")
+
         # 查找轮廓
         contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"[DEBUG RED] Found {len(contours)} contours")
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 5:  # 过滤太小的区域
+            if area > 1:  # 极低面积阈值 (3->1)
                 M = cv2.moments(contour)
                 if M["m00"] != 0:
                     cx = int(M["m10"] / M["m00"])
@@ -188,6 +195,7 @@ class DetailedScalpAnalyzer:
                         'type': '红斑' if area > 100 else '红点'
                     })
 
+        print(f"[DEBUG RED] Total red_dots appended: {len(red_dots)}")
         return red_dots
 
     @staticmethod
@@ -203,25 +211,25 @@ class DetailedScalpAnalyzer:
         saturation = img_hsv[:, :, 1]
         value = img_hsv[:, :, 2]
 
-        # 方法1: 高亮度低饱和度检测（纯白色鳞屑）
+        # 方法1: 高亮度低饱和度检测（纯白色鳞屑）- 针对显微镜照片的极亮白点
         pure_white_mask = np.logical_and(
-            np.logical_and(value > 200, saturation < 30),
-            l_channel > 180  # LAB的L通道高值
+            np.logical_and(value > 200, saturation < 100),  # 显微镜模式: 检测极亮白点
+            l_channel > 180  # 显微镜模式: 极高亮度
         ).astype(np.uint8) * 255
 
-        # 方法2: 银白色鳞屑检测（中高亮度，极低饱和度）
+        # 方法2: 银白色鳞屑检测（中高亮度，极低饱和度）- 针对显微镜反光
         silver_white_mask = np.logical_and(
-            np.logical_and(value > 180, saturation < 40),
-            np.logical_and(l_channel > 160, l_channel <= 200)
+            np.logical_and(value > 180, saturation < 80),  # 显微镜模式: 高亮反光
+            np.logical_and(l_channel > 160, l_channel <= 220)  # 显微镜模式: 亮区
         ).astype(np.uint8) * 255
 
-        # 方法3: 黄色油腻性鳞屑检测（脂溢性皮炎特征）
+        # 方法3: 黄色油腻性鳞屑检测（脂溢性皮炎特征）- 显微镜下的油脂反光
         # 黄色：低饱和度，中等亮度，b通道偏正（黄色）
         yellow_flakes_mask = np.logical_and(
-            np.logical_and(value > 140, value < 220),
-            np.logical_and(saturation > 20, saturation < 80)
+            np.logical_and(value > 150, value < 245),  # 显微镜模式: 高亮油脂
+            np.logical_and(saturation > 5, saturation < 60)  # 显微镜模式: 低饱和
         )
-        yellow_flakes_mask = np.logical_and(yellow_flakes_mask, b_channel > 130).astype(np.uint8) * 255
+        yellow_flakes_mask = np.logical_and(yellow_flakes_mask, b_channel > 125).astype(np.uint8) * 255  # 显微镜模式
 
         # 合并所有鳞屑类型
         white_mask = cv2.bitwise_or(pure_white_mask, silver_white_mask)
@@ -237,12 +245,19 @@ class DetailedScalpAnalyzer:
         white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel_small)
         white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel)
 
+        # 调试输出
+        print(f"[DEBUG FLAKE] Pure white mask pixels: {np.sum(pure_white_mask > 0)}")
+        print(f"[DEBUG FLAKE] Silver mask pixels: {np.sum(silver_white_mask > 0)}")
+        print(f"[DEBUG FLAKE] Yellow mask pixels: {np.sum(yellow_flakes_mask > 0)}")
+        print(f"[DEBUG FLAKE] Combined mask pixels: {np.sum(white_mask > 0)}")
+
         # 查找轮廓
         contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"[DEBUG FLAKE] Found {len(contours)} contours")
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 8:  # 降低阈值，检测更小的鳞屑
+            if area > 1:  # 极度降低阈值，检测更小的鳞屑 (4->1)
                 M = cv2.moments(contour)
                 if M["m00"] != 0:
                     cx = int(M["m10"] / M["m00"])
@@ -286,6 +301,7 @@ class DetailedScalpAnalyzer:
                         'severity': 'severe' if area > 200 else 'moderate' if area > 50 else 'mild'
                     })
 
+        print(f"[DEBUG FLAKE] Total white_flakes appended: {len(white_flakes)}")
         return white_flakes
 
     @staticmethod

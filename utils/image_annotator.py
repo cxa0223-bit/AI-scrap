@@ -37,7 +37,7 @@ class ScalpImageAnnotator:
         show_legend: bool = True
     ) -> Image.Image:
         """
-        在图像上标注分析结果
+        在图像上标注分析结果 - 只标记重点区域
 
         Args:
             image: 原始PIL图像
@@ -60,29 +60,45 @@ class ScalpImageAnnotator:
         # 创建标注图层
         annotated = img_array.copy()
 
-        # 标注红点/红斑
+        # 标注红点/红斑 - 只标记重点
         if 'red_dots' in local_results and local_results['red_dots']:
+            # 过滤并聚合红点，只保留重点区域 - 降低阈值
+            filtered_dots = self._filter_and_cluster(
+                local_results['red_dots'],
+                min_area=10,        # 降低到10像素
+                max_clusters=15,    # 增加到15个
+                cluster_distance=80 # 增加聚类距离
+            )
             annotated = self._annotate_red_dots(
                 annotated,
-                local_results['red_dots'],
+                filtered_dots,
                 show_labels
             )
 
-        # 标注白色鳞屑
+        # 标注白色鳞屑 - 只标记重点
         if 'white_flakes' in local_results and local_results['white_flakes']:
+            # 过滤并聚合鳞屑，只保留重点区域 - 降低阈值
+            filtered_flakes = self._filter_and_cluster(
+                local_results['white_flakes'],
+                min_area=20,        # 降低到20像素
+                max_clusters=15,    # 增加到15个
+                cluster_distance=80 # 增加聚类距离
+            )
             annotated = self._annotate_white_flakes(
                 annotated,
-                local_results['white_flakes'],
+                filtered_flakes,
                 show_labels
             )
 
-        # 标注毛囊
+        # 标注毛囊 - 只标记重点
         if 'follicle_info' in local_results and local_results['follicle_info']:
             follicle_data = local_results['follicle_info']
             if 'detected_follicles' in follicle_data:
+                # 只标记前5个最明显的毛囊
+                filtered_follicles = follicle_data['detected_follicles'][:5]
                 annotated = self._annotate_follicles(
                     annotated,
-                    follicle_data['detected_follicles'],
+                    filtered_follicles,
                     show_labels
                 )
 
@@ -438,3 +454,80 @@ class ScalpImageAnnotator:
                 draw.text((x, y + 10), label, fill='black', font=font)
 
         return canvas
+
+    def _filter_and_cluster(
+        self,
+        detections: List[Dict],
+        min_area: int = 50,
+        max_clusters: int = 10,
+        cluster_distance: int = 50
+    ) -> List[Dict]:
+        """
+        过滤并聚类检测点，只保留重点区域
+
+        Args:
+            detections: 原始检测结果列表
+            min_area: 最小面积阈值，只保留大于此值的检测点
+            max_clusters: 最多保留的聚类数量
+            cluster_distance: 聚类距离阈值（像素）
+
+        Returns:
+            过滤和聚类后的检测结果
+        """
+        if not detections:
+            return []
+
+        # 第一步：按面积过滤，只保留较大的检测点
+        filtered = [d for d in detections if d.get('area', 0) >= min_area]
+
+        # 如果过滤后数量已经很少，直接返回
+        if len(filtered) <= max_clusters:
+            return sorted(filtered, key=lambda x: x.get('area', 0), reverse=True)
+
+        # 第二步：按面积排序，优先考虑大的
+        filtered.sort(key=lambda x: x.get('area', 0), reverse=True)
+
+        # 第三步：聚类 - 合并距离近的检测点
+        clusters = []
+
+        for detection in filtered:
+            center = detection.get('center', detection.get('position', (0, 0)))
+
+            # 查找是否有邻近的聚类
+            merged = False
+            for cluster in clusters:
+                cluster_center = cluster['center']
+                distance = np.sqrt(
+                    (center[0] - cluster_center[0])**2 +
+                    (center[1] - cluster_center[1])**2
+                )
+
+                # 如果距离小于阈值，合并到该聚类
+                if distance < cluster_distance:
+                    # 更新聚类中心（加权平均）
+                    cluster_area = cluster.get('area', 0)
+                    detection_area = detection.get('area', 0)
+                    total_area = cluster_area + detection_area
+
+                    new_x = (cluster_center[0] * cluster_area + center[0] * detection_area) / total_area
+                    new_y = (cluster_center[1] * cluster_area + center[1] * detection_area) / total_area
+
+                    cluster['center'] = (int(new_x), int(new_y))
+                    cluster['area'] = total_area
+                    cluster['count'] = cluster.get('count', 1) + 1
+                    merged = True
+                    break
+
+            # 如果没有合并，创建新聚类
+            if not merged:
+                new_cluster = detection.copy()
+                new_cluster['count'] = 1
+                clusters.append(new_cluster)
+
+        # 第四步：按面积排序，只保留前N个聚类
+        clusters.sort(key=lambda x: x.get('area', 0), reverse=True)
+        result = clusters[:max_clusters]
+
+        print(f"[FILTER] Original: {len(detections)}, Filtered: {len(filtered)}, Clustered: {len(result)}")
+
+        return result

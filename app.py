@@ -770,12 +770,21 @@ with tab1:
                                 # 执行本地分析以获取检测结果
                                 local_analysis = analyze_scalp_image(img)
 
+                                # DEBUG: 显示结果结构
+                                st.write(f"[DEBUG] Image {idx+1} keys:", list(local_analysis.keys()))
+                                if 'detailed_analysis' in local_analysis:
+                                    st.write(f"[DEBUG] detailed_analysis keys:", list(local_analysis['detailed_analysis'].keys()))
+                                    if 'micro_symptoms' in local_analysis['detailed_analysis']:
+                                        st.write(f"[DEBUG] micro_symptoms keys:", list(local_analysis['detailed_analysis']['micro_symptoms'].keys()))
+
                                 # 调试：记录检测到的问题数量
                                 red_count = len(local_analysis.get('red_dots', []))
                                 flake_count = len(local_analysis.get('white_flakes', []))
                                 follicle_count = 0
                                 if 'follicle_info' in local_analysis:
                                     follicle_count = len(local_analysis['follicle_info'].get('detected_follicles', []))
+
+                                st.write(f"[DEBUG] Direct counts: red={red_count}, flakes={flake_count}")
 
                                 # 累计统计
                                 total_red_dots += red_count
@@ -830,6 +839,13 @@ with tab1:
                 # 显示检测统计信息
                 if 'detection_stats' in st.session_state:
                     stats = st.session_state['detection_stats']
+
+                    # DEBUG: 显示调试信息框
+                    with st.expander("🔍 DEBUG INFO - 调试信息", expanded=True):
+                        st.warning(f"检测统计: 红点={stats.get('red_dots', 0)}, 鳞屑={stats.get('flakes', 0)}, 毛囊={stats.get('follicles', 0)}")
+                        if 'uploaded_images' in st.session_state:
+                            st.info(f"已上传图片数量: {len(st.session_state['uploaded_images'])}")
+
                     col_stat1, col_stat2, col_stat3 = st.columns(3)
                     with col_stat1:
                         st.metric("🔴 红点检测", f"{stats.get('red_dots', 0)} 个")

@@ -9,3 +9,6 @@ matplotlib>=3.9.0
 
 # AI Service Libraries
 openai>=1.40.0
+
+# PDF Generation
+reportlab>=4.0.0

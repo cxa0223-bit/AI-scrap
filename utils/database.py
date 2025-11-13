@@ -103,7 +103,10 @@ def init_database():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysis_history(created_at)")
 
         conn.commit()
-        print("Database tables initialized successfully")
+        try:
+            print("Database tables initialized successfully")
+        except (OSError, ValueError):
+            pass  # Ignore print errors on Windows
 
 # 产品相关操作
 class ProductDB:
@@ -245,7 +248,7 @@ class AnalysisHistoryDB:
 
     @staticmethod
     def get_user_history(session_id: str, limit: int = 10) -> List[Dict]:
-        """获取用户的分析历史"""
+        """获取用户的分析历史（通过session_id）"""
         import json
 
         with get_db_connection() as conn:
@@ -267,6 +270,74 @@ class AnalysisHistoryDB:
                 history.append(record)
 
             return history
+
+    @staticmethod
+    def get_user_history_by_id(user_id: str, limit: int = 50) -> List[Dict]:
+        """获取用户的分析历史（通过user_id）"""
+        import json
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM analysis_history
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """, (user_id, limit))
+
+            history = []
+            for row in cursor.fetchall():
+                record = dict(row)
+                # 解析JSON字符串
+                record['concerns'] = json.loads(record.get('concerns', '[]'))
+                record['diagnosed_conditions'] = json.loads(record.get('diagnosed_conditions', '[]'))
+                record['recommendations'] = json.loads(record.get('recommendations', '[]'))
+                history.append(record)
+
+            return history
+
+    @staticmethod
+    def get_user_statistics(user_id: str) -> Dict:
+        """获取用户的统计数据"""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+
+            # 总分析次数
+            cursor.execute("""
+            SELECT COUNT(*) as total FROM analysis_history WHERE user_id = ?
+            """, (user_id,))
+            total_analyses = cursor.fetchone()['total']
+
+            # 平均健康评分
+            cursor.execute("""
+            SELECT AVG(health_score) as avg_score FROM analysis_history WHERE user_id = ?
+            """, (user_id,))
+            avg_health_score = cursor.fetchone()['avg_score'] or 0
+
+            # 最近分析时间
+            cursor.execute("""
+            SELECT created_at FROM analysis_history
+            WHERE user_id = ?
+            ORDER BY created_at DESC LIMIT 1
+            """, (user_id,))
+            last_analysis = cursor.fetchone()
+            last_analysis_date = last_analysis['created_at'] if last_analysis else None
+
+            # 头皮类型分布
+            cursor.execute("""
+            SELECT scalp_type, COUNT(*) as count
+            FROM analysis_history
+            WHERE user_id = ?
+            GROUP BY scalp_type
+            """, (user_id,))
+            scalp_distribution = {row['scalp_type']: row['count'] for row in cursor.fetchall()}
+
+            return {
+                'total_analyses': total_analyses,
+                'avg_health_score': round(avg_health_score, 1),
+                'last_analysis_date': last_analysis_date,
+                'scalp_distribution': scalp_distribution
+            }
 
     @staticmethod
     def get_statistics() -> Dict:
@@ -345,7 +416,10 @@ def migrate_from_csv():
     csv_path = "data/products.csv"
 
     if not os.path.exists(csv_path):
-        print("CSV file not found, skipping migration")
+        try:
+            print("CSV file not found, skipping migration")
+        except (OSError, ValueError):
+            pass
         return False
 
     try:
@@ -357,7 +431,10 @@ def migrate_from_csv():
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) as count FROM products")
             if cursor.fetchone()['count'] > 0:
-                print("Database already has product data, skipping migration")
+                try:
+                    print("Database already has product data, skipping migration")
+                except (OSError, ValueError):
+                    pass
                 return False
 
             # 迁移数据到SQLite
@@ -375,11 +452,17 @@ def migrate_from_csv():
                 }
                 ProductDB.add_product(product_data)
 
-            print(f"Successfully migrated {len(df)} products to SQLite database")
+            try:
+                print(f"Successfully migrated {len(df)} products to SQLite database")
+            except (OSError, ValueError):
+                pass
             return True
 
     except Exception as e:
-        print(f"Data migration failed: {e}")
+        try:
+            print(f"Data migration failed: {e}")
+        except (OSError, ValueError):
+            pass
         return False
 
 # 初始化函数
@@ -396,7 +479,10 @@ def setup_database():
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) as count FROM products WHERE is_active = 1")
         product_count = cursor.fetchone()['count']
-        print(f"Database has {product_count} active products")
+        try:
+            print(f"Database has {product_count} active products")
+        except (OSError, ValueError):
+            pass
 
 if __name__ == "__main__":
     # 测试数据库设置

@@ -60,14 +60,14 @@ class ScalpImageAnnotator:
         # 创建标注图层
         annotated = img_array.copy()
 
-        # 标注红点/红斑 - 只标记重点
+        # 标注红点/红斑 - 提高灵敏度检测更多问题
         if 'red_dots' in local_results and local_results['red_dots']:
-            # 过滤并聚合红点，只保留重点区域 - 降低阈值
+            # 过滤并聚合红点 - 使用更灵敏的阈值
             filtered_dots = self._filter_and_cluster(
                 local_results['red_dots'],
-                min_area=10,        # 降低到10像素
-                max_clusters=15,    # 增加到15个
-                cluster_distance=80 # 增加聚类距离
+                min_area=5,         # 进一步降低到5像素，检测小炎症点
+                max_clusters=25,    # 增加到25个，显示更多问题
+                cluster_distance=60 # 减小聚类距离，保留更多独立区域
             )
             annotated = self._annotate_red_dots(
                 annotated,
@@ -75,14 +75,14 @@ class ScalpImageAnnotator:
                 show_labels
             )
 
-        # 标注白色鳞屑 - 只标记重点
+        # 标注白色鳞屑 - 提高灵敏度
         if 'white_flakes' in local_results and local_results['white_flakes']:
-            # 过滤并聚合鳞屑，只保留重点区域 - 降低阈值
+            # 过滤并聚合鳞屑 - 使用更灵敏的阈值
             filtered_flakes = self._filter_and_cluster(
                 local_results['white_flakes'],
-                min_area=20,        # 降低到20像素
-                max_clusters=15,    # 增加到15个
-                cluster_distance=80 # 增加聚类距离
+                min_area=10,        # 降低到10像素，检测小鳞屑
+                max_clusters=25,    # 增加到25个
+                cluster_distance=60 # 减小聚类距离
             )
             annotated = self._annotate_white_flakes(
                 annotated,

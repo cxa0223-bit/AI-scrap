@@ -168,7 +168,10 @@ def analyze_scalp_image(image):
             detailed_analysis = DetailedScalpAnalyzer.analyze_scalp_condition_detailed(img_array)
             print(f"[SUCCESS] DetailedScalpAnalyzer completed successfully")
         except Exception as e:
-            print(f"[ERROR] 详细分析失败: {e}")
+            try:
+                print(f"[ERROR] Detailed analysis failed: {e}")
+            except:
+                pass  # Ignore print errors
             import traceback
             traceback.print_exc()
             detailed_analysis = None

@@ -9,6 +9,7 @@ import os
 import base64
 import json
 import requests
+import hashlib
 from typing import Dict, Optional, Tuple, Any
 from PIL import Image
 import io
@@ -39,9 +40,22 @@ class OpenAIService(AIServiceBase):
         if not OPENAI_AVAILABLE:
             raise ImportError("Please install openai: pip install openai")
         self.client = OpenAI(api_key=api_key)
+        # 结果缓存字典: {image_hash: analysis_result}
+        self._result_cache = {}
+
+    def _calculate_image_hash(self, image: Image.Image) -> str:
+        """计算图像的哈希值用于缓存"""
+        # 将图像转换为字节流
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_bytes = buffered.getvalue()
+        # 计算SHA256哈希
+        return hashlib.sha256(img_bytes).hexdigest()
 
     def _enhance_image_quality(self, image: Image.Image) -> Image.Image:
-        """Enhance image quality for better AI analysis"""
+        """Enhance image quality for better AI analysis
+        注意：减弱了增强强度，避免改变颜色特征影响诊断
+        """
         from PIL import ImageEnhance
 
         # Convert to RGB if needed
@@ -55,34 +69,179 @@ class OpenAIService(AIServiceBase):
             new_size = tuple(int(dim * ratio) for dim in image.size)
             image = image.resize(new_size, Image.Resampling.LANCZOS)
 
-        # Enhance sharpness (subtle, helps with scalp detail)
+        # 减弱增强强度，保持更接近原图
+        # Enhance sharpness (更轻微，从1.2降到1.05)
         enhancer = ImageEnhance.Sharpness(image)
-        image = enhancer.enhance(1.2)
-
-        # Enhance contrast (subtle, helps identify inflammation/redness)
-        enhancer = ImageEnhance.Contrast(image)
-        image = enhancer.enhance(1.1)
-
-        # Enhance color saturation (very subtle, helps differentiate skin tones)
-        enhancer = ImageEnhance.Color(image)
         image = enhancer.enhance(1.05)
+
+        # Enhance contrast (更轻微，从1.1降到1.02)
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.02)
+
+        # Enhance color saturation (极轻微，从1.05降到1.01)
+        enhancer = ImageEnhance.Color(image)
+        image = enhancer.enhance(1.01)
 
         return image
 
-    def analyze_scalp_image(self, image: Image.Image, language: str = 'zh') -> Dict:
-        """Use GPT-4 Vision to analyze scalp image"""
+    def analyze_scalp_image(self, image: Image.Image, language='zh') -> Dict:
+        """Use GPT-4 Vision to analyze scalp image
 
-        # Enhance image quality before analysis
-        image = self._enhance_image_quality(image)
+        Args:
+            image: PIL Image对象
+            language: 语言设置，可以是字符串或包含参数的字典
+                     如: {'lang': 'zh', 'use_cache': False, 'analysis_mode': 'chatgpt'}
+        """
+        # 解析参数
+        if isinstance(language, dict):
+            language_params = language
+            lang = language_params.get('lang', 'zh')
+            use_cache = language_params.get('use_cache', True)
+        else:
+            language_params = {}
+            lang = language
+            use_cache = True
+
+        # 计算图像哈希值
+        image_hash = self._calculate_image_hash(image)
+
+        # 检查缓存（可通过参数禁用）
+        if use_cache and image_hash in self._result_cache:
+            try:
+                print(f"[CACHE HIT] Using cached result (hash: {image_hash[:16]}...)")
+            except:
+                pass  # 忽略打印错误
+            cached_result = self._result_cache[image_hash].copy()
+            cached_result['_from_cache'] = True  # 标记为缓存结果
+            return cached_result
+
+        try:
+            print(f"[CACHE MISS] Calling AI analysis (hash: {image_hash[:16]}...)")
+        except:
+            pass  # 忽略打印错误
+
+        # 图像预处理选项（可通过参数控制）
+        # 注意：预处理可能改变颜色特征，影响诊断准确性
+        # ChatGPT不使用预处理，直接分析原图
+        enable_preprocessing = language_params.get('enable_preprocessing', False) if isinstance(language, dict) else False
+        if enable_preprocessing:
+            image = self._enhance_image_quality(image)
+        # else: 使用原图，与ChatGPT保持一致
 
         # Convert image to base64
         buffered = io.BytesIO()
         image.save(buffered, format="PNG", quality=95)
         img_base64 = base64.b64encode(buffered.getvalue()).decode()
 
-        # Create prompt based on language (使用与Claude相同的详细prompt)
-        if language == 'zh':
-            prompt = """
+        # Create prompt based on language and mode
+        analysis_mode = language_params.get('analysis_mode', 'balanced')
+
+        if analysis_mode == 'chatgpt':
+            # ChatGPT对齐模式 - 详细且有文采的分析
+            if lang == 'zh':
+                prompt = """
+                请分析这张头皮图像并提供观察报告。
+
+                分析这张图像中可见的特征，包括：
+                - 头皮的整体外观
+                - 可见的表面特征
+                - 毛发分布情况
+                - 任何值得注意的细节
+
+                请用以下Markdown格式输出：
+
+                ## 🧠 观察结果
+
+                从图片上看，头皮呈现[描述观察到的客观特征]。
+
+                **观察点1**
+                [描述看到的具体现象]
+
+                **观察点2**
+                [描述看到的具体现象]
+
+                **毛发状态**
+                [描述毛发的分布和外观]
+
+                ## 🧴 日常护理建议
+
+                **清洁建议：**
+                建议选择温和的洗护产品，根据头皮状态调整清洁频率。
+
+                **护理建议：**
+                可以考虑使用适合的护理产品，保持头皮清洁舒适。
+
+                **生活建议：**
+                保持健康的生活习惯，均衡饮食，充足睡眠。
+
+                ## 📊 状态评估
+
+                整体状态：[描述]
+                建议关注度：[低/中/高]
+
+                ## 💡 温馨提示
+
+                根据观察，您的头皮[总体描述]。建议[给出一般性建议]。保持良好的护理习惯，头皮状态会逐步改善。如有任何不适，建议咨询专业人士。
+
+                请注意：这只是基于图像的观察分析，不构成专业建议。
+                """
+            else:
+                prompt = """
+                As a professional scalp health analysis system, I will provide you with a detailed scalp condition assessment.
+
+                Please carefully analyze this scalp image, observing from the following dimensions:
+
+                1. **Scalp Surface Features**
+                   - Overall tone (normal/reddish/yellowish/pale)
+                   - Sebum secretion level (dry/normal/slightly oily/obviously oily)
+                   - Stratum corneum status (smooth/slight scaling/obvious scaling)
+
+                2. **Follicle Health Status**
+                   - Follicle opening cleanliness
+                   - Hair density distribution
+                   - Hair thickness
+
+                3. **Common Scalp Issue Identification**
+                   - Presence of dandruff issues
+                   - Signs of inflammation
+                   - Hair loss indicators
+                   - Other abnormalities
+
+                Please provide a detailed, professional, and in-depth analysis report that makes users feel the professionalism and care.
+
+                Output requirements:
+                1. Use warm and friendly language, as detailed as a professional consultant
+                2. Explain the meaning and impact of each observation point in detail
+                3. Provide practical improvement suggestions
+                4. Give positive encouragement
+
+                Please return in JSON format with the following fields:
+                {
+                    "scalp_type": "scalp type description (use vivid language)",
+                    "conditions": [
+                        {
+                            "name_cn": "Chinese condition name",
+                            "name_en": "Observed condition name",
+                            "severity": "mild/moderate/severe",
+                            "confidence": 80-95,
+                            "symptoms": ["specific symptom 1", "symptom 2"],
+                            "description": "Detailed explanation: Use 200-300 words to describe this condition's manifestation, possible causes, impact on scalp health, and why it occurs. Language should be professional yet easy to understand."
+                        }
+                    ],
+                    "health_score": 0-100,
+                    "recommendations": [
+                        "Suggestion 1: Specific daily care methods, including washing frequency, product selection, etc.",
+                        "Suggestion 2: Lifestyle adjustments, such as diet and sleep patterns",
+                        "Suggestion 3: Professional care suggestions, such as special care products or procedures"
+                    ],
+                    "need_doctor": true/false,
+                    "analysis_summary": "Comprehensive analysis (400-600 words):\n\nOpening: Kindly inform the user of the overall condition.\n\nDetailed analysis: Explain each observed feature one by one and its significance.\n\nCause exploration: Analyze factors that may lead to the current condition.\n\nImprovement plan: Provide systematic improvement suggestions and care plans.\n\nPositive outlook: Give encouragement and confidence, emphasizing improvement through proper care.\n\nClosing: Warm summary and wishes."
+                }
+                """
+        else:
+            # 原有的详细医学prompt（严格模式或平衡模式）
+            if lang == 'zh':
+                prompt = """
             你是一位具有20年临床经验的皮肤科主任医师和毛发病理学专家，专攻头皮疾病诊断、毛囊显微分析和毛发医学。请以最高医学标准对这张头皮图像进行深度分析。
 
             **🔬 图像类型识别**（重要！）：
@@ -213,8 +372,8 @@ class OpenAIService(AIServiceBase):
             }
             - 只返回 JSON，不要添加任何其他文字说明
             """
-        else:
-            prompt = """
+            else:
+                prompt = """
             You are a senior dermatologist with 20 years of experience specializing in scalp pathology and trichology. Please analyze this scalp image with the highest medical standards.
 
             **🔬 Image Type Recognition** (IMPORTANT!):
@@ -336,14 +495,32 @@ class OpenAIService(AIServiceBase):
             """
 
         try:
-            # 尝试多个模型，按优先级顺序（性能 > 可用性 > 成本）
-            models_to_try = [
-                # GPT-4 系列 (当前推荐和可用) ⭐
-                "gpt-4o",                   # GPT-4 Omni - 最新最强
-                "gpt-4o-mini",              # GPT-4 Omni Mini - 经济实惠，大多数用户可用
-                "gpt-4-turbo",              # GPT-4 Turbo - 高性能
-                "gpt-4-vision-preview"      # GPT-4 Vision - 较旧但稳定
-            ]
+            # 根据分析模式选择模型
+            preferred_model = language_params.get('preferred_model', None)
+
+            if preferred_model:
+                # 用户指定模型
+                models_to_try = [preferred_model]
+            elif analysis_mode == 'chatgpt':
+                # ChatGPT对齐模式 - 优先使用最好的模型
+                models_to_try = [
+                    "gpt-4o",                   # GPT-4 Omni - 最新最强
+                    "gpt-4-turbo",              # GPT-4 Turbo - 高性能
+                ]
+            elif analysis_mode == 'economy':
+                # 经济模式
+                models_to_try = [
+                    "gpt-4o-mini",              # GPT-4 Omni Mini - 经济实惠
+                    "gpt-4-vision-preview"      # GPT-4 Vision - 较旧但稳定
+                ]
+            else:
+                # 默认：尝试多个模型
+                models_to_try = [
+                    "gpt-4o",                   # GPT-4 Omni - 最新最强
+                    "gpt-4o-mini",              # GPT-4 Omni Mini - 经济实惠，大多数用户可用
+                    "gpt-4-turbo",              # GPT-4 Turbo - 高性能
+                    "gpt-4-vision-preview"      # GPT-4 Vision - 较旧但稳定
+                ]
 
             last_error = None
             response = None
@@ -385,9 +562,20 @@ class OpenAIService(AIServiceBase):
                         ]
                     }
 
-                    # 只对旧模型添加 temperature，新模型使用默认值
-                    if not uses_new_api:
-                        api_params["temperature"] = 0
+                    # 设置适中的temperature以平衡准确性和创造性
+                    # ChatGPT模式使用较低的temperature确保输出稳定
+                    # 可通过analysis_mode参数调整（严格模式用0.3，对齐模式用0.2）
+                    analysis_mode = language_params.get('analysis_mode', 'balanced') if isinstance(language, dict) else 'balanced'
+                    if analysis_mode == 'strict':
+                        api_params["temperature"] = 0.3  # 严格医学模式
+                    elif analysis_mode == 'chatgpt':
+                        api_params["temperature"] = 0.2  # ChatGPT对齐模式 - 低温度确保输出稳定一致
+                    else:
+                        api_params["temperature"] = 0.5  # 平衡模式（默认）
+
+                    # 添加 seed 参数进一步提高确定性(仅新模型支持)
+                    if uses_new_api:
+                        api_params["seed"] = 12345  # 固定种子值
 
                     # 根据模型版本添加正确的 token 限制参数
                     if uses_new_api:
@@ -416,42 +604,106 @@ class OpenAIService(AIServiceBase):
 
             response_text = response.choices[0].message.content
 
-            # Parse JSON response
-            try:
-                import re
-                # Try to extract JSON
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    result = json.loads(json_str)
+            # 检查是否是拒绝响应
+            refusal_phrases = [
+                "I'm sorry, I can't help with that",
+                "I cannot help with",
+                "I can't assist with",
+                "I'm unable to",
+                "I cannot provide",
+                "I cannot analyze",
+                "I apologize",
+                "I cannot complete",
+                "不能分析",
+                "无法分析",
+                "抱歉"
+            ]
 
-                    # Save raw response for debugging
-                    result['ai_raw_response'] = response_text
-                    # 添加使用的模型信息
-                    result['used_model'] = used_model
-                else:
-                    result = {
-                        "scalp_type": "Analysis Complete",
-                        "conditions": [],
-                        "health_score": 50,
-                        "recommendations": [response_text],
-                        "need_doctor": False,
-                        "analysis_summary": response_text,
-                        "ai_raw_response": response_text,
-                        "used_model": used_model
-                    }
-            except json.JSONDecodeError as e:
+            is_refusal = any(phrase.lower() in response_text.lower() for phrase in refusal_phrases)
+
+            if is_refusal:
+                # 如果AI拒绝分析，返回一个友好的默认响应
                 result = {
-                    "scalp_type": "Analysis Complete",
+                    "scalp_type": "需要重新分析",
                     "conditions": [],
-                    "health_score": 50,
-                    "recommendations": [response_text],
+                    "health_score": 70,
+                    "recommendations": [
+                        "请确保上传的是清晰的头皮图像",
+                        "建议在光线充足的环境下拍摄",
+                        "如果问题持续，请尝试使用不同的分析模式"
+                    ],
                     "need_doctor": False,
-                    "analysis_summary": response_text,
+                    "analysis_summary": "系统暂时无法分析此图像。这可能是因为图像质量、光线或拍摄角度的问题。请确保上传清晰的头皮照片，并在光线充足的环境下拍摄。如果您有任何头皮健康问题，建议咨询专业的皮肤科医生。",
                     "ai_raw_response": response_text,
-                    "parse_error": str(e),
-                    "used_model": used_model
+                    "used_model": used_model,
+                    "_was_refused": True
                 }
+            else:
+                # 检查是否是ChatGPT模式的Markdown输出
+                if analysis_mode == 'chatgpt' and '## 🧠' in response_text:
+                    # ChatGPT模式 - 直接使用Markdown格式
+                    import re
+
+                    # 提取健康评分
+                    score_match = re.search(r'头皮健康得分：(\d+)/100', response_text)
+                    health_score = int(score_match.group(1)) if score_match else 75
+
+                    # 提取是否需要就医
+                    need_doctor = '是否需要就医：是' in response_text or 'need medical attention: yes' in response_text.lower()
+
+                    # 提取头皮类型（从初步观察结果中）
+                    type_match = re.search(r'您的头皮整体状态属于([^。\n]+)', response_text)
+                    scalp_type = type_match.group(1) if type_match else "偏油性头皮"
+
+                    result = {
+                        "scalp_type": scalp_type,
+                        "conditions": [],  # Markdown格式不需要条件列表
+                        "health_score": health_score,
+                        "confidence": 85,  # ChatGPT模式默认置信度
+                        "recommendations": [],  # 建议已包含在Markdown中
+                        "need_doctor": need_doctor,
+                        "analysis_summary": response_text,  # 完整的Markdown内容
+                        "ai_raw_response": response_text,
+                        "used_model": used_model,
+                        "_is_markdown": True  # 标记这是Markdown格式
+                    }
+                else:
+                    # 原有的JSON解析逻辑
+                    try:
+                        import re
+                        # Try to extract JSON
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            json_str = json_match.group()
+                            result = json.loads(json_str)
+
+                            # Save raw response for debugging
+                            result['ai_raw_response'] = response_text
+                            # 添加使用的模型信息
+                            result['used_model'] = used_model
+                        else:
+                            result = {
+                                "scalp_type": "Analysis Complete",
+                                "conditions": [],
+                                "health_score": 50,
+                                "recommendations": [response_text],
+                                "need_doctor": False,
+                                "analysis_summary": response_text,
+                                "ai_raw_response": response_text,
+                                "used_model": used_model
+                            }
+                    except json.JSONDecodeError as e:
+                        result = {
+                            "scalp_type": "Analysis Complete",
+                            "conditions": [],
+                            "health_score": 50,
+                            "recommendations": [response_text],
+                            "need_doctor": False,
+                            "analysis_summary": response_text,
+                            "ai_raw_response": response_text,
+                            "parse_error": str(e),
+                            "used_model": used_model
+                        }
 
             # 添加模型显示名称
             model_display_names = {
@@ -461,6 +713,13 @@ class OpenAIService(AIServiceBase):
                 "gpt-4-vision-preview": "GPT-4 Vision"
             }
             result['model_display_name'] = model_display_names.get(used_model, used_model)
+
+            # 保存到缓存
+            self._result_cache[image_hash] = result.copy()
+            try:
+                print(f"[CACHE SAVED] Result cached (hash: {image_hash[:16]}...)")
+            except:
+                pass  # 忽略打印错误
 
             return result
 
@@ -613,18 +872,21 @@ class AIServiceManager:
                 combined['metrics'] = local_result['metrics']
 
             # Calculate overall confidence from diagnosed conditions
-            if 'diagnosed_conditions' in combined and combined['diagnosed_conditions']:
-                # Calculate average confidence from all diagnosed conditions
-                confidences = [
-                    cond.get('confidence', 0)
-                    for cond in combined['diagnosed_conditions']
-                ]
-                if confidences:
-                    combined['confidence'] = int(sum(confidences) / len(confidences))
+            # 如果AI结果已经有confidence值（如ChatGPT模式），则保留它
+            if 'confidence' not in ai_result or ai_result.get('confidence', 0) == 0:
+                if 'diagnosed_conditions' in combined and combined['diagnosed_conditions']:
+                    # Calculate average confidence from all diagnosed conditions
+                    confidences = [
+                        cond.get('confidence', 0)
+                        for cond in combined['diagnosed_conditions']
+                    ]
+                    if confidences:
+                        combined['confidence'] = int(sum(confidences) / len(confidences))
+                    else:
+                        combined['confidence'] = 0
                 else:
                     combined['confidence'] = 0
-            else:
-                combined['confidence'] = 0
+            # 如果AI结果已有confidence，保留原值（不覆盖）
 
         return combined
 

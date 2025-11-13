@@ -2,11 +2,27 @@
 头皮健康AI分析系统 - 马来西亚版
 Scalp Health AI Analysis System - Malaysia Edition
 """
+# -*- coding: utf-8 -*-
+import sys
+import os
+
+# 设置UTF-8编码（Windows兼容性）
+if sys.platform.startswith('win'):
+    import io
+    # 只在必要时重新包装stdout/stderr，避免关闭已有的包装器
+    if not isinstance(sys.stdout, io.TextIOWrapper) or sys.stdout.encoding != 'utf-8':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except AttributeError:
+            # Python < 3.7 fallback
+            import codecs
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'replace')
+
 import streamlit as st
 import pandas as pd
 from PIL import Image
-import sys
-import os
 
 # 添加utils目录到路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
@@ -16,11 +32,24 @@ from recommender import load_products, recommend_products, format_product_card, 
 from database import init_database, AnalysisHistoryDB, RecommendationDB, setup_database
 from ai_services import AIServiceManager
 from image_annotator import ScalpImageAnnotator
+from user_auth import UserAuthManager
+from pdf_generator import ScalpAnalysisPDFGenerator
 import uuid
 from datetime import datetime
 
 # 初始化数据库
 setup_database()
+
+# 初始化用户认证管理器
+auth_manager = UserAuthManager()
+
+# 初始化session_state
+if 'user_logged_in' not in st.session_state:
+    st.session_state['user_logged_in'] = False
+if 'user_info' not in st.session_state:
+    st.session_state['user_info'] = None
+if 'user_id' not in st.session_state:
+    st.session_state['user_id'] = None
 
 # 页面配置
 st.set_page_config(
@@ -269,6 +298,117 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    # 用户认证部分
+    st.markdown("---")
+
+    # 验证会话
+    if not st.session_state['user_logged_in'] and st.session_state.get('auth_session_id'):
+        valid, user_info = auth_manager.validate_session(st.session_state['auth_session_id'])
+        if valid:
+            st.session_state['user_logged_in'] = True
+            st.session_state['user_info'] = user_info
+            st.session_state['user_id'] = user_info['user_id']
+
+    # 用户信息显示
+    if st.session_state['user_logged_in']:
+        user_info = st.session_state['user_info']
+
+        st.markdown("""
+        <div style="
+            background: white;
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        ">
+            <p style="color: #667eea; margin: 0; font-weight: 600;">👤 欢迎回来!</p>
+            <p style="color: #764ba2; margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                {} {}
+            </p>
+        </div>
+        """.format(user_info.get('username', ''),
+                   "⭐ 高级会员" if user_info.get('is_premium') else ""),
+        unsafe_allow_html=True)
+
+        if st.button("🚪 退出登录", use_container_width=True):
+            # 清除会话
+            if st.session_state.get('auth_session_id'):
+                auth_manager.logout_user(st.session_state['auth_session_id'])
+            st.session_state['user_logged_in'] = False
+            st.session_state['user_info'] = None
+            st.session_state['user_id'] = None
+            st.session_state['auth_session_id'] = None
+            st.success("已成功退出登录")
+            st.rerun()
+    else:
+        # 登录/注册表单
+        auth_tab1, auth_tab2 = st.tabs(["🔐 登录", "📝 注册"])
+
+        with auth_tab1:
+            st.markdown("### 用户登录")
+            with st.form("login_form"):
+                username_email = st.text_input("用户名/邮箱", placeholder="输入用户名或邮箱")
+                password = st.text_input("密码", type="password", placeholder="输入密码")
+                submit_login = st.form_submit_button("登录", use_container_width=True)
+
+                if submit_login:
+                    if not username_email or not password:
+                        st.error("请填写所有字段")
+                    else:
+                        success, msg, user_info = auth_manager.login_user(username_email, password)
+                        if success:
+                            # 创建会话
+                            session_id = auth_manager.create_session(user_info['user_id'])
+                            st.session_state['user_logged_in'] = True
+                            st.session_state['user_info'] = user_info
+                            st.session_state['user_id'] = user_info['user_id']
+                            st.session_state['auth_session_id'] = session_id
+                            # 增加用户分析次数
+                            auth_manager.increment_analysis_count(user_info['user_id'])
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+        with auth_tab2:
+            st.markdown("### 新用户注册")
+            with st.form("register_form"):
+                new_username = st.text_input("用户名*", placeholder="4-20个字符")
+                new_email = st.text_input("邮箱*", placeholder="your@email.com")
+                new_password = st.text_input("密码*", type="password", placeholder="至少6个字符")
+                confirm_password = st.text_input("确认密码*", type="password", placeholder="再次输入密码")
+
+                st.markdown("##### 可选信息")
+                full_name = st.text_input("真实姓名", placeholder="选填")
+                col_age, col_gender = st.columns(2)
+                with col_age:
+                    age = st.number_input("年龄", min_value=1, max_value=120, value=25)
+                with col_gender:
+                    gender = st.selectbox("性别", ["不透露", "男", "女", "其他"])
+
+                submit_register = st.form_submit_button("注册", use_container_width=True)
+
+                if submit_register:
+                    if not new_username or not new_email or not new_password:
+                        st.error("请填写所有必填字段")
+                    elif new_password != confirm_password:
+                        st.error("两次密码输入不一致")
+                    else:
+                        success, msg, user_id = auth_manager.register_user(
+                            username=new_username,
+                            email=new_email,
+                            password=new_password,
+                            full_name=full_name if full_name else None,
+                            age=age if age else None,
+                            gender=gender if gender != "不透露" else None
+                        )
+                        if success:
+                            st.success(msg)
+                            st.info("请使用新账户登录")
+                        else:
+                            st.error(msg)
+
+    st.markdown("---")
+
     # 使用指南
     st.markdown("### 📋 使用指南 | How to Use")
     st.markdown("""
@@ -482,6 +622,7 @@ with tab1:
                             st.session_state['ai_config']['service'] = 'GPT-4 Vision (OpenAI)'
                             st.session_state['ai_config']['combine_results'] = False
                             st.session_state['ai_config']['language'] = 'zh'
+                            st.session_state['ai_config']['analysis_mode'] = 'chatgpt'  # 默认ChatGPT对齐模式
                             st.success("✅ GPT-4 API密钥已配置")
                     else:
                         # 显示密钥来源
@@ -537,9 +678,34 @@ with tab1:
             # 显示AI配置状态（调试信息）
             st.markdown("---")
 
-            # 添加调试模式开关
-            debug_mode = st.checkbox("🐛 启用调试模式 (Debug Mode)", value=False,
-                                    help="显示详细的 AI 分析过程和原始响应")
+            # 分析模式选择
+            st.markdown("#### 🎯 Analysis Mode | 分析模式")
+            analysis_mode = st.radio(
+                "选择分析模式:",
+                options=['chatgpt', 'balanced', 'strict', 'economy'],
+                format_func=lambda x: {
+                    'chatgpt': '🤖 ChatGPT对齐模式 (与ChatGPT结果相似)',
+                    'balanced': '⚖️ 平衡模式 (默认推荐)',
+                    'strict': '🏥 严格医学模式 (详细医学分析)',
+                    'economy': '💰 经济模式 (使用GPT-4o-mini节省成本)'
+                }[x],
+                index=0,  # 默认选ChatGPT对齐模式
+                help="不同模式使用不同的Temperature和Prompt策略"
+            )
+
+            # 高级选项
+            with st.expander("⚙️ 高级选项", expanded=False):
+                # 缓存控制
+                use_cache = st.checkbox("使用缓存", value=True,
+                                       help="关闭后每次都会重新分析")
+
+                # 图像预处理
+                enable_preprocessing = st.checkbox("启用图像预处理", value=False,
+                                                  help="ChatGPT不使用预处理")
+
+                # 添加调试模式开关
+                debug_mode = st.checkbox("🐛 启用调试模式 (Debug Mode)", value=False,
+                                        help="显示详细的 AI 分析过程和原始响应")
 
             with st.expander("🔍 AI配置状态 | AI Configuration Status", expanded=False):
                 ai_config = st.session_state.get('ai_config', {})
@@ -610,7 +776,14 @@ with tab1:
                                         st.info(f"🔧 调试: 正在调用 {service_type}")
                                         st.info(f"🔧 调试: 语言设置 = {language}")
 
-                                    ai_result = ai_service.analyze_scalp_image(image, language)
+                                    # 构建AI参数（传递用户选择的模式）
+                                    ai_params = {
+                                        'lang': language,
+                                        'analysis_mode': analysis_mode,  # 分析模式
+                                        'use_cache': use_cache,  # 是否使用缓存
+                                        'enable_preprocessing': enable_preprocessing  # 是否预处理
+                                    }
+                                    ai_result = ai_service.analyze_scalp_image(image, ai_params)
 
                                     # 保存调试信息到 session
                                     if ai_config.get('debug_mode', False):
@@ -829,7 +1002,55 @@ with tab1:
             result = st.session_state['result']
             
             # 显示分析结果
-            st.success("✅ Analysis Complete! | 分析完成！")
+            if result.get('_from_cache'):
+                st.success("✅ Analysis Complete! | 分析完成！ (来自缓存 - 结果一致性保证)")
+            else:
+                st.success("✅ Analysis Complete! | 分析完成！")
+
+            # PDF下载按钮
+            col_pdf1, col_pdf2 = st.columns([3, 1])
+            with col_pdf2:
+                try:
+                    import tempfile
+
+                    # 生成PDF报告
+                    pdf_gen = ScalpAnalysisPDFGenerator()
+
+                    # 创建临时文件
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                        tmp_path = tmp_file.name
+
+                    # 准备用户信息
+                    user_info = None
+                    if st.session_state.get('user_logged_in'):
+                        user_info = st.session_state.get('user_info')
+
+                    # 生成PDF报告
+                    pdf_gen.generate_report(
+                        output_path=tmp_path,
+                        analysis_result=result,
+                        images=st.session_state.get('uploaded_images', []),
+                        annotated_images=st.session_state.get('annotated_images', []),
+                        user_info=user_info
+                    )
+
+                    # 读取PDF文件
+                    with open(tmp_path, 'rb') as pdf_file:
+                        pdf_bytes = pdf_file.read()
+
+                    # 删除临时文件
+                    os.unlink(tmp_path)
+
+                    # 创建下载按钮
+                    st.download_button(
+                        label="📄 下载PDF报告",
+                        data=pdf_bytes,
+                        file_name=f"scalp_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.warning(f"PDF生成失败: {str(e)}")
 
             # 显示标注图像（如果有）
             if 'annotated_images' in st.session_state and st.session_state['annotated_images']:
@@ -940,8 +1161,14 @@ with tab1:
             # 显示AI综合分析总结
             if 'analysis_summary' in result and result['analysis_summary']:
                 st.markdown("---")
-                st.markdown("#### 📊 综合分析报告 | Comprehensive Analysis")
-                st.success(result['analysis_summary'])
+                # 检查是否是Markdown格式
+                if result.get('_is_markdown', False):
+                    # ChatGPT模式的Markdown输出 - 直接渲染
+                    st.markdown(result['analysis_summary'])
+                else:
+                    # 传统JSON格式输出
+                    st.markdown("#### 📊 综合分析报告 | Comprehensive Analysis")
+                    st.success(result['analysis_summary'])
 
             # 显示头皮分区分析（新增）
             if 'scalp_zone_analysis' in result and result['scalp_zone_analysis']:
@@ -1260,22 +1487,6 @@ with tab1:
                         for rec in advice['recommendations']:
                             st.write(f"• {rec}")
 
-            # 检测到的问题
-            st.markdown("---")
-            st.markdown("#### 🎯 Detected Issues | 检测到的问题")
-            concerns = result.get('concerns', [])
-            if concerns:
-                for concern in concerns:
-                    st.warning(concern)
-            else:
-                st.info("未发现明显问题 | No significant issues detected")
-
-            # 护理建议
-            st.markdown("#### 💡 Care Recommendations | 护理建议")
-            scalp_type = result.get('scalp_type', 'normal')
-            recommendations = get_care_recommendations(scalp_type)
-            for rec in recommendations:
-                st.info(f"✓ {rec}")
         else:
             st.info("👆 Please upload an image and click analyze | 请先上传照片并点击分析按钮")
     
@@ -1381,37 +1592,72 @@ with tab1:
             st.error("Product database not found | 产品数据库未找到")
 
 with tab2:
-    st.markdown("### 📊 分析历史 | Analysis History")
+    # 判断用户是否登录
+    user_logged_in = st.session_state.get('user_logged_in', False)
+    user_id = st.session_state.get('user_id')
 
-    # 获取当前会话的分析历史
-    history = AnalysisHistoryDB.get_user_history(st.session_state['session_id'], limit=20)
+    if user_logged_in and user_id:
+        # 用户已登录 - 显示完整的个人统计和历史
+        st.markdown("### 👤 我的个人中心 | My Profile")
 
-    if history:
-        st.success(f"找到 {len(history)} 条分析记录")
+        # 获取用户统计数据
+        user_stats = AnalysisHistoryDB.get_user_statistics(user_id)
+        user_info = st.session_state.get('user_info', {})
 
-        # 显示统计信息
-        col1, col2, col3 = st.columns(3)
+        # 显示统计数据
+        st.markdown("#### 📊 我的统计")
+        col1, col2, col3, col4 = st.columns(4)
 
-        # 计算平均健康分数
-        avg_score = sum(h['health_score'] for h in history) / len(history)
         with col1:
-            st.metric("平均健康分数", f"{avg_score:.1f}/100")
+            st.metric("总分析次数", user_stats['total_analyses'])
 
-        # 最常见的头皮类型
-        scalp_types = {}
-        for h in history:
-            scalp_type = h['scalp_type']
-            scalp_types[scalp_type] = scalp_types.get(scalp_type, 0) + 1
-        most_common = max(scalp_types.items(), key=lambda x: x[1])[0] if scalp_types else "无"
         with col2:
-            st.metric("最常见类型", most_common)
+            st.metric("平均健康评分", f"{user_stats['avg_health_score']}/100")
 
         with col3:
-            st.metric("总分析次数", len(history))
+            st.metric("账户等级", "⭐ 高级" if user_info.get('is_premium') else "📊 免费")
+
+        with col4:
+            st.metric("最近分析", user_stats['last_analysis_date'][:10] if user_stats['last_analysis_date'] else "无记录")
 
         st.markdown("---")
 
-        # 显示历史记录列表
+        # 显示分析历史
+        st.markdown("#### 📋 分析历史")
+        history = AnalysisHistoryDB.get_user_history_by_id(user_id, limit=50)
+    else:
+        # 用户未登录 - 显示当前会话的历史
+        st.markdown("### 📊 分析历史 | Analysis History")
+        st.info("💡 登录后可查看完整的个人分析历史和统计数据")
+
+        # 获取当前会话的分析历史
+        history = AnalysisHistoryDB.get_user_history(st.session_state['session_id'], limit=20)
+
+        if history:
+            # 显示简单统计信息
+            col1, col2, col3 = st.columns(3)
+
+            # 计算平均健康分数
+            avg_score = sum(h['health_score'] for h in history) / len(history)
+            with col1:
+                st.metric("平均健康分数", f"{avg_score:.1f}/100")
+
+            # 最常见的头皮类型
+            scalp_types = {}
+            for h in history:
+                scalp_type = h['scalp_type']
+                scalp_types[scalp_type] = scalp_types.get(scalp_type, 0) + 1
+            most_common = max(scalp_types.items(), key=lambda x: x[1])[0] if scalp_types else "无"
+            with col2:
+                st.metric("最常见类型", most_common)
+
+            with col3:
+                st.metric("本次会话分析", len(history))
+
+            st.markdown("---")
+
+    # 显示历史记录列表（对所有用户）
+    if history:
         for i, record in enumerate(history, 1):
             with st.expander(f"📅 {record['created_at']} - {record['scalp_type']}", expanded=(i==1)):
                 col_a, col_b = st.columns(2)
